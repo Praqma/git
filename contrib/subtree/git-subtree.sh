@@ -14,7 +14,7 @@ git subtree add   --prefix=<prefix> <repository> <ref>
 git subtree merge --prefix=<prefix> <commit>
 git subtree pull  --prefix=<prefix> <repository> <ref>
 git subtree push  --prefix=<prefix> <repository> <ref>
-git subtree split --prefix=<prefix> <commit>
+git subtree split --prefix=<prefix> <commit...>
 --
 h,help        show the help
 q             quiet
@@ -77,12 +77,6 @@ assert () {
 	fi
 }
 
-ensure_single_rev () {
-	if test $# -ne 1
-	then
-		die "You must provide exactly one revision.  Got: '$@'"
-	fi
-}
 
 while test $# -gt 0
 do
@@ -191,7 +185,6 @@ if test "$command" != "pull" &&
 then
 	revs=$(git rev-parse $default --revs-only "$@") || exit $?
 	dirs=$(git rev-parse --no-revs --no-flags "$@") || exit $?
-	ensure_single_rev $revs
 	if test -n "$dirs"
 	then
 		die "Error: Use --prefix instead of bare filenames."
@@ -723,8 +716,9 @@ cmd_add_repository () {
 }
 
 cmd_add_commit () {
-	rev=$(git rev-parse $default --revs-only "$@") || exit $?
-	ensure_single_rev $rev
+	revs=$(git rev-parse $default --revs-only "$@") || exit $?
+	set -- $revs
+	rev="$1"
 
 	debug "Adding $dir as '$rev'..."
 	git read-tree --prefix="$dir" $rev || exit $?
@@ -823,9 +817,15 @@ cmd_split () {
 }
 
 cmd_merge () {
-	rev=$(git rev-parse $default --revs-only "$@") || exit $?
-	ensure_single_rev $rev
+	revs=$(git rev-parse $default --revs-only "$@") || exit $?
 	ensure_clean
+
+	set -- $revs
+	if test $# -ne 1
+	then
+		die "You must provide exactly one revision.  Got: '$revs'"
+	fi
+	rev="$1"
 
 	if test -n "$squash"
 	then
