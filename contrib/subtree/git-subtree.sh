@@ -32,7 +32,8 @@ squash        merge subtree changes as a single commit
 "
 eval "$(echo "$OPTS_SPEC" | git rev-parse --parseopt -- "$@" || echo exit $?)"
 
-PATH=$PATH:$(git --exec-path)
+PATH=$PATH:$( git --exec-path)
+PATH=$PATH:$( git --exec-path | sed -e 's/C:/\/c/')
 . git-sh-setup
 
 require_work_tree
@@ -798,12 +799,11 @@ cmd_split () {
 	fi
 	if test -n "$branch"
 	then
-		if rev_exists "refs/heads/$branch"
-		then
-			if ! rev_is_descendant_of_branch "$latest_new" "$branch"
-			then
-				die "Branch '$branch' is not an ancestor of commit '$latest_new'."
-			fi
+		if rev_exists "refs/heads/$branch"; then
+#			if ! rev_is_descendant_of_branch "$latest_new" "$branch"
+#			then
+#				die "Branch '$branch' is not an ancestor of commit '$latest_new'."
+#			fi
 			action='Updated'
 		else
 			action='Created'
