@@ -9,22 +9,34 @@ git-subtree - Merge subtrees together and split repository into subtrees
 SYNOPSIS
 --------
 [verse]
-'git subtree' add   -P <prefix> <commit>
-'git subtree' add   -P <prefix> <repository> <ref>
-'git subtree' pull  -P <prefix> <repository> <ref>
-'git subtree' push  -P <prefix> <repository> <ref>
-'git subtree' merge -P <prefix> <commit>
-'git subtree' split -P <prefix> [OPTIONS] [<commit>]
+'git subtree' add    -P <prefix> <commit>
+'git subtree' add    -P <prefix> <repository> <ref>
+'git subtree' pull   -P <prefix> <repository> <ref>
+'git subtree' push   -P <prefix> <repository> <ref>
+'git subtree' merge  -P <prefix> <commit>
+'git subtree' split  -P <prefix> [OPTIONS] [<commit>]
+'git subtree' export -P <prefix> [OPTIONS] [<commit>]
 
 
 DESCRIPTION
 -----------
-Subtrees allow subprojects to be included within a subdirectory
+Firstly 'subtree' allow subprojects to be included within a subdirectory
 of the main project, optionally including the subproject's
 entire history.
 
 For example, you could include the source code for a library
 as a subdirectory of your application.
+
+Secondly 'subtree' allows to export a subdirectory to its own
+history and hereafter delta export change.
+
+For example, you are the maintainer of a setup containing several parts
+and each part is a delivery for others to consume. Each delivery can
+then be provided as a single repository. Each consumer can then add this
+using subtree or submodule. Another example, your repository contains
+test ( and/or testdata ) and is not optimal be delivered alon the component
+or subsystem the consumer needs. The maintainer can still work in a mono
+repository to avoid (submodule) complexity, but deliver as multiple repositories.
 
 Subtrees are not to be confused with submodules, which are meant for
 the same task. Unlike submodules, subtrees do not need any special
@@ -106,6 +118,16 @@ split::
 	contents of <prefix> at the root of the project instead
 	of in a subdirectory.  Thus, the newly created history
 	is suitable for export as a separate git repository.
+
+export::
+	Extract a new, synthetic project history from the
+	history of the <prefix> subtree in the same way as split, but it
+	allows unrelated-histories as it is expected to be a virgin
+	history. Each commit is postfixed with <subdir> and origin
+	<sha1> for tracability and faster delta export. It simulates
+	merges. The functionality is simular to filter-branch, but here
+	you have the options to delta export/split and prefix and reference to
+	original commit.
 +
 After splitting successfully, a single commit id is printed to stdout.
 This corresponds to the HEAD of the newly created tree, which you can
@@ -175,7 +197,7 @@ remain intact and can be later split and send upstream to the
 subproject.
 
 
-OPTIONS FOR split
+OPTIONS FOR split and export
 -----------------
 --annotate=<annotation>::
 	This option is only valid for the split command.
@@ -221,6 +243,16 @@ If you used 'git subtree add', you should never need this option.
 
 --rejoin::
 	This option is only valid for the split command.
+
+--allow-un-hist::
+	This option allows the split to accept un-related histories. It is
+	needed if the subdir did not origin from a previous add command.
+	This is default set for "export" command.
+
+--append-info::
+	This options add postfix infomation to all splitted commit for tracablility
+	and to trace back if the onto branch is a virgin and unrelated history.
+	This is default set for "export" command.
 +
 After splitting, merge the newly created synthetic history back into
 your main project.  That way, future splits can search only the part of
@@ -340,6 +372,23 @@ Then push the new branch onto the new empty repository:
 
 	$ git push <new-repo> split:master
 
+EXAMPLE 4. Extract/export a subtree to new unrelated history
+-----------------------------------------
+Suppose you have repository where you develop a component or subsystem
+including test data ( can be large or confidential ). You need to deliver
+the source code with full history for others to add as a submodule or subtree.
+The consumers report issues based on tag or sha1.
+
+First clone you current large repository including your subdirectory snd full
+history.
+
+	$ git-subtree.sh split --prefix <subdir> --branch <branch> --allow-un-hist --append-info
+
+The result is the original repository history and new branch <branch>
+
+The developers keeps adding changes to the original repository including in the subdirectory and a new delivery is
+
+	$ git-subtree.sh split --prefix <subdir> --branch <branch> --onto <branch> --allow-un-hist --append-info
 
 AUTHOR
 ------
