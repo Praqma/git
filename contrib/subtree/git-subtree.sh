@@ -8,31 +8,38 @@ if test $# -eq 0
 then
 	set -- -h
 fi
+
 OPTS_SPEC="\
-git subtree add   --prefix=<prefix> <commit>
-git subtree add   --prefix=<prefix> <repository> <ref>
-git subtree merge --prefix=<prefix> <commit>
-git subtree pull  --prefix=<prefix> <repository> <ref>
-git subtree push  --prefix=<prefix> <repository> <ref>
-git subtree split --prefix=<prefix> <commit>
+git subtree add    --prefix=<prefix> <commit>
+git subtree add    --prefix=<prefix> <repository> <ref>
+git subtree merge  --prefix=<prefix> <commit>
+git subtree pull   --prefix=<prefix> <repository> <ref>
+git subtree push   --prefix=<prefix> <repository> <ref>
+git subtree split  --prefix=<prefix> <commit>
+git subtree export --prefix=<prefix> <commit>   ( INFO: --allow-un-hist and --append-info are default set compared to split )
 --
-h,help        show the help
-q             quiet
-d             show debug messages
-P,prefix=     the name of the subdir to split out
-m,message=    use the given message as the commit message for the merge commit
- options for 'split'
-annotate=     add a prefix to commit message of new commits
-b,branch=     create a new branch from the split subtree
-ignore-joins  ignore prior --rejoin commits
-onto=         try connecting new tree to an existing one
-rejoin        merge the new branch back into HEAD
- options for 'add', 'merge', and 'pull'
+h,help         show the help
+q              quiet
+d              show debug messages
+P,prefix=      the name of the subdir to split out
+m,message=     use the given message as the commit message for the merge commit
+ options for 'split' and 'export'
+allow-un-hist  accept onto branch is not a descendant branch - alias unrelated histories. ( Default for export )
+annotate=      add a prefix to commit message of new commits
+append-info    append the subdir and original commit sha1 to the split commit msg ( Default for export )
+b,branch=      create a new branch from the split subtree
+ignore-joins   ignore prior --rejoin commits
+onto=          try connecting new tree to an existing one
+rejoin         merge the new branch back into HEAD
+revlist-prefix Only list the commits from prefix ( Experimental )
+
+ options for 'add', 'merge' and 'pull'
 squash        merge subtree changes as a single commit
 "
 eval "$(echo "$OPTS_SPEC" | git rev-parse --parseopt -- "$@" || echo exit $?)"
 
-PATH=$PATH:$(git --exec-path)
+PATH=$PATH:$( git --exec-path)
+PATH=$PATH:$( git --exec-path | sed -e 's/C:/\/c/')
 . git-sh-setup
 
 require_work_tree
@@ -45,9 +52,15 @@ onto=
 rejoin=
 ignore_joins=
 annotate=
+append_info=
+append_info_default=1
 squash=
 message=
 prefix=
+allow_un_hist=
+allow_un_hist_default=1
+revlist_prefix=
+final_progress=
 
 debug () {
 	if test -n "$debug"
@@ -68,6 +81,7 @@ progress () {
 	then
 		printf "%s\r" "$*" >&2
 	fi
+	final_progress="$*"
 }
 
 assert () {
@@ -102,6 +116,14 @@ do
 		;;
 	--no-annotate)
 		annotate=
+		;;
+	--append-info)
+		append_info_default=
+		append_info=1
+		;;
+	--no-append-info)
+		append_info_default=
+		append_info=
 		;;
 	-b)
 		branch="$1"
@@ -143,6 +165,20 @@ do
 	--no-squash)
 		squash=
 		;;
+	--allow-un-hist)
+		allow_un_hist_default=
+		allow_un_hist=1
+		;;
+	--no-allow-un-hist)
+		allow_un_hist_default=
+		allow_un_hist=
+		;;
+	--revlist-prefix)
+		revlist_prefix=1
+		;;
+	--no-revlist-prefix)
+		revlist_prefix=
+		;;
 	--)
 		break
 		;;
@@ -161,6 +197,17 @@ add|merge|pull)
 	;;
 split|push)
 	default="--default HEAD"
+	;;
+export)
+	default="--default HEAD"
+	if test -n $allow_un_hist_default
+	then
+		allow_un_hist=1
+	fi
+	if test -n $append_info_default
+	then
+		append_info=1
+	fi
 	;;
 *)
 	die "Unknown command '$command'"
@@ -203,7 +250,6 @@ debug "quiet: {$quiet}"
 debug "revs: {$revs}"
 debug "dir: {$dir}"
 debug "opts: {$*}"
-debug
 
 cache_setup () {
 	cachedir="$GIT_DIR/subtree-cache/$$"
@@ -264,6 +310,14 @@ cache_set () {
 		die "cache for $oldrev already exists!"
 	fi
 	echo "$newrev" >"$cachedir/$oldrev"
+}
+
+cache_remove () {
+	rev="$1"
+	if test -e "$cachedir/$rev"
+	then
+		rm "$cachedir/$rev"
+	fi
 }
 
 rev_exists () {
@@ -413,6 +467,11 @@ copy_commit () {
 		(
 			printf "%s" "$annotate"
 			cat
+			if test -n $append_info
+			then
+			    printf "\ngit-subtree-dir: %s" "$dir"
+			    printf "\ngit-subtree-mainline: %s" "$1"
+			fi
 		) |
 		git commit-tree "$2" $3  # reads the rest of stdin
 	) || die "Can't copy commit $1"
@@ -655,7 +714,47 @@ process_split_commit () {
 	fi
 	createcount=$(($createcount + 1))
 	debug "  parents: $parents"
-	check_parents "$parents" "$indent"
+	if test -n $onto
+	then
+		if rev_exists "$onto"
+		then
+	        parents_mainline=$(cache_get $parents)
+			for parent in "$parents_mainline"
+			do
+				grep_format="^git-subtree-dir:"
+				git log --grep="$grep_format" \
+					--no-show-signature --pretty=format:'START %H%n%s%n%n%b%nEND%n' $onto |
+				while read a b junk
+				do
+					case "$a" in
+					START)
+						sub="$b"
+						;;
+					git-subtree-mainline:)
+						main="$(git rev-parse "$b")" ||
+							die "could not rev-parse split hash $b from commit $sub"
+						;;
+					END)
+						if test -n "$main" -a -n "$sub"
+						then
+							debug "  Mainline: $main -> $onto: $sub"
+							cache_remove $main
+							cache_set $main $sub || die "already exists"
+						else
+							die "  Could not read: $main -> $sub"
+						fi
+						main=
+						sub=
+						;;
+					esac
+				done
+			done
+		else
+			newparents=$(cache_get $parents)
+		fi
+	else
+		check_parents "$parents" "$indent"
+	fi
 	newparents=$(cache_get $parents)
 	debug "  newparents: $newparents"
 
@@ -753,6 +852,9 @@ cmd_add_commit () {
 
 	say "Added dir '$dir'"
 }
+cmd_export (){
+	cmd_split "$@"
+}
 
 cmd_split () {
 	debug "Splitting $dir..."
@@ -760,23 +862,50 @@ cmd_split () {
 
 	if test -n "$onto"
 	then
-		debug "Reading history for --onto=$onto..."
-		git rev-list $onto |
-		while read rev
-		do
-			# the 'onto' history is already just the subdir, so
-			# any parent we find there can be used verbatim
-			debug "  cache: $rev"
-			cache_set "$rev" "$rev"
-		done
+		if rev_exists "$onto"
+		then
+			if test -n "$allow_un_hist"
+			then
+				debug "Reading history for current history from last split point"
+				split_sha1=$(git log -1 $onto | grep "    git-subtree-mainline: " | awk -F ": " '{print $2}')
+				git rev-list $split_sha1 |
+					while read rev
+					do
+						# the 'onto' history is already just the subdir, so
+						# any parent we find there can be used verbatim
+						debug "  cache: $rev"
+						cache_set "$rev" "$rev"
+					done
+			fi
+			debug "Reading history for --onto=$onto..."
+			git rev-list $onto |
+				while read rev
+				do
+					# the 'onto' history is already just the subdir, so
+					# any parent we find there can be used verbatim
+					debug "  cache: $rev"
+					cache_set "$rev" "$rev"
+				done
+			revs=$(git log -1 $onto | grep "    git-subtree-mainline: " | awk -F ": " '{print $2}')
+			revs="${revs}.."
+		else
+			debug "--onto=${onto} branch does not exist - skip listing commits to cache"
+			unrevs="$(find_existing_splits "$dir" "$revs")"
+		fi
 	fi
-
-	unrevs="$(find_existing_splits "$dir" "$revs")"
 
 	# We can't restrict rev-list to only $dir here, because some of our
 	# parents have the $dir contents the root, and those won't match.
 	# (and rev-list --follow doesn't seem to solve this)
-	grl='git rev-list --topo-order --reverse --parents $revs $unrevs'
+	if test -n "${revlist_prefix}"
+	then
+		# The split works - at least - in context of unrelated histories ( export )
+		revlist_dir_options="-- $dir"
+		say "Experimental: '-- $dir' added to rev-list command due to option: --revlist_prefix"
+	else
+		revlist_dir_options=""
+	fi
+	grl='git rev-list --topo-order --reverse --parents $revs $unrevs $revlist_dir_options'
 	revmax=$(eval "$grl" | wc -l)
 	revcount=0
 	createcount=0
@@ -786,6 +915,7 @@ cmd_split () {
 	do
 		process_split_commit "$rev" "$parents" 0
 	done || exit $?
+	say "$final_progress"
 
 	latest_new=$(cache_get latest_new)
 	if test -z "$latest_new"
@@ -808,7 +938,12 @@ cmd_split () {
 		then
 			if ! rev_is_descendant_of_branch "$latest_new" "$branch"
 			then
-				die "Branch '$branch' is not an ancestor of commit '$latest_new'."
+				if ! test -n "$allow_un_hist"
+				then
+				    debug "Revision is not descendant of $branch, but flag allow-un-hist is set"
+				else
+				    die "Branch '$branch' is not an ancestor of commit '$latest_new'."
+				fi
 			fi
 			action='Updated'
 		else
@@ -816,9 +951,8 @@ cmd_split () {
 		fi
 		git update-ref -m 'subtree split' \
 			"refs/heads/$branch" "$latest_new" || exit $?
-		say "$action branch '$branch'"
+		say "$action branch '$branch': $latest_new"
 	fi
-	echo "$latest_new"
 	exit 0
 }
 
