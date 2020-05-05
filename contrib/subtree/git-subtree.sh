@@ -48,6 +48,7 @@ annotate=
 squash=
 message=
 prefix=
+final_progress=
 
 debug () {
 	if test -n "$debug"
@@ -68,6 +69,7 @@ progress () {
 	then
 		printf "%s\r" "$*" >&2
 	fi
+	final_progress="$*"
 }
 
 assert () {
@@ -786,6 +788,7 @@ cmd_split () {
 	do
 		process_split_commit "$rev" "$parents" 0
 	done || exit $?
+	say "$final_progress"
 
 	latest_new=$(cache_get latest_new)
 	if test -z "$latest_new"
