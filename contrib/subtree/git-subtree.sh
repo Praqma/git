@@ -16,18 +16,20 @@ git subtree pull  --prefix=<prefix> <repository> <ref>
 git subtree push  --prefix=<prefix> <repository> <ref>
 git subtree split --prefix=<prefix> <commit>
 --
-h,help        show the help
-q             quiet
-d             show debug messages
-P,prefix=     the name of the subdir to split out
-m,message=    use the given message as the commit message for the merge commit
+h,help         show the help
+q              quiet
+d              show debug messages
+P,prefix=      the name of the subdir to split out
+m,message=     use the given message as the commit message for the merge commit
  options for 'split'
-annotate=     add a prefix to commit message of new commits
-b,branch=     create a new branch from the split subtree
-ignore-joins  ignore prior --rejoin commits
-onto=         try connecting new tree to an existing one
-rejoin        merge the new branch back into HEAD
- options for 'add', 'merge', and 'pull'
+annotate=      add a prefix to commit message of new commits
+b,branch=      create a new branch from the split subtree
+ignore-joins   ignore prior --rejoin commits
+onto=          try connecting new tree to an existing one
+rejoin         merge the new branch back into HEAD
+revlist-prefix Only list the commits from prefix ( Experimental )
+
+ options for 'add', 'merge' and 'pull'
 squash        merge subtree changes as a single commit
 "
 eval "$(echo "$OPTS_SPEC" | git rev-parse --parseopt -- "$@" || echo exit $?)"
@@ -49,6 +51,11 @@ squash=
 message=
 prefix=
 final_progress=
+
+# We can't restrict rev-list to only $dir here, because some of our
+# parents have the $dir contents the root, and those won't match.
+# (and rev-list --follow doesn't seem to solve this)
+revlist_dir_options=
 
 debug () {
 	if test -n "$debug"
@@ -145,6 +152,12 @@ do
 	--no-squash)
 		squash=
 		;;
+	--revlist-prefix)
+		revlist_dir_options=1
+		;;
+	--no-revlist-prefix)
+		revlist_dir_options=
+		;;
 	--)
 		break
 		;;
@@ -186,6 +199,11 @@ add)
 esac
 
 dir="$(dirname "$prefix/.")"
+
+if test -n "$revlist_dir_options"
+then
+	revlist_dir_options="-- $dir"
+fi
 
 if test "$command" != "pull" &&
 		test "$command" != "add" &&
@@ -779,6 +797,7 @@ cmd_split () {
 	# parents have the $dir contents the root, and those won't match.
 	# (and rev-list --follow doesn't seem to solve this)
 	grl='git rev-list --topo-order --reverse --parents $revs $unrevs'
+	grl='git rev-list --topo-order --reverse --parents $revs $unrevs $revlist_dir_options'
 	revmax=$(eval "$grl" | wc -l)
 	revcount=0
 	createcount=0

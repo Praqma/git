@@ -221,6 +221,12 @@ If you used 'git subtree add', you should never need this option.
 
 --rejoin::
 	This option is only valid for the split command.
+
+--revlist-prefix::
+	This experimental option uses the prefix as subdirectory in the
+	rev-list command to get the commits to process. Default the
+	behaviour lists all commits from head and then filters them
+	based on the prefix.
 +
 After splitting, merge the newly created synthetic history back into
 your main project.  That way, future splits can search only the part of
