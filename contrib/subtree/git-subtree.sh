@@ -878,7 +878,8 @@ cmd_split () {
 	latest_new=$(cache_get latest_new)
 	if test -z "$latest_new"
 	then
-		die "No new revisions were found"
+		say "No new revisions were found - no actions - just exit"
+		exit 0
 	fi
 
 	if test -n "$rejoin"
