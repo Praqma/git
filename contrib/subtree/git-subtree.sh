@@ -297,6 +297,14 @@ cache_set () {
 	echo "$newrev" >"$cachedir/$oldrev"
 }
 
+cache_remove () {
+	rev="$1"
+	if test -e "$cachedir/$rev"
+	then
+		rm "$cachedir/$rev"
+	fi
+}
+
 rev_exists () {
 	if git rev-parse "$1" >/dev/null 2>&1
 	then
@@ -691,7 +699,47 @@ process_split_commit () {
 	fi
 	createcount=$(($createcount + 1))
 	debug "  parents: $parents"
-	check_parents "$parents" "$indent"
+	if test -n $onto
+	then
+		if rev_exists "$onto"
+		then
+	        parents_mainline=$(cache_get $parents)
+			for parent in "$parents_mainline"
+			do
+				grep_format="^git-subtree-dir:"
+				git log --grep="$grep_format" \
+					--no-show-signature --pretty=format:'START %H%n%s%n%n%b%nEND%n' $onto |
+				while read a b junk
+				do
+					case "$a" in
+					START)
+						sub="$b"
+						;;
+					git-subtree-mainline:)
+						main="$(git rev-parse "$b")" ||
+							die "could not rev-parse split hash $b from commit $sub"
+						;;
+					END)
+						if test -n "$main" -a -n "$sub"
+						then
+							debug "  Mainline: $main -> $onto: $sub"
+							cache_remove $main
+							cache_set $main $sub || die "already exists"
+						else
+							die "  Could not read: $main -> $sub"
+						fi
+						main=
+						sub=
+						;;
+					esac
+				done
+			done
+		else
+			newparents=$(cache_get $parents)
+		fi
+	else
+		check_parents "$parents" "$indent"
+	fi
 	newparents=$(cache_get $parents)
 	debug "  newparents: $newparents"
 
@@ -796,23 +844,25 @@ cmd_split () {
 
 	if test -n "$onto"
 	then
-		debug "Reading history for --onto=$onto..."
-		git rev-list $onto |
-		while read rev
-		do
-			# the 'onto' history is already just the subdir, so
-			# any parent we find there can be used verbatim
-			debug "  cache: $rev"
-			cache_set "$rev" "$rev"
-		done
+		if rev_exists "$onto"
+		then
+			debug "Reading history for --onto=$onto..."
+			git rev-list $onto |
+				while read rev
+				do
+					# the 'onto' history is already just the subdir, so
+					# any parent we find there can be used verbatim
+					debug "  cache: $rev"
+					cache_set "$rev" "$rev"
+				done
+			revs=$(git log -1 $onto | grep "    git-subtree-mainline: " | awk -F ": " '{print $2}')
+			revs="${revs}.."
+		else
+			debug "--onto=${onto} branch does not exist - skip listing commits to cache"
+			unrevs="$(find_existing_splits "$dir" "$revs")"
+		fi
 	fi
 
-	unrevs="$(find_existing_splits "$dir" "$revs")"
-
-	# We can't restrict rev-list to only $dir here, because some of our
-	# parents have the $dir contents the root, and those won't match.
-	# (and rev-list --follow doesn't seem to solve this)
-	grl='git rev-list --topo-order --reverse --parents $revs $unrevs'
 	grl='git rev-list --topo-order --reverse --parents $revs $unrevs $revlist_dir_options'
 	revmax=$(eval "$grl" | wc -l)
 	revcount=0

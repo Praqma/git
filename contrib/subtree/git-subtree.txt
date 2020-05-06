@@ -19,12 +19,23 @@ SYNOPSIS
 
 DESCRIPTION
 -----------
-Subtrees allow subprojects to be included within a subdirectory
+Firstly 'subtree' allow subprojects to be included within a subdirectory
 of the main project, optionally including the subproject's
 entire history.
 
 For example, you could include the source code for a library
 as a subdirectory of your application.
+
+Secondly 'subtree' allows to extract a subdirectory to its own
+history and hereafter delta extract change.
+
+For example, you are the maintainer of a setup containing several parts
+and each part is a delivery for others to consume. Each delivery can
+then be provided as a single repository. Each consumer can then add this
+using subtree or submodule. Another example, your repository contains
+test ( and/or testdata ) and is not optimal be delivered alon the component
+or subsystem the consumer needs. The maintainer can still work in a mono
+repository to avoid (submodule) complexity, but deliver as multiple repositories.
 
 Subtrees are not to be confused with submodules, which are meant for
 the same task. Unlike submodules, subtrees do not need any special
@@ -332,8 +343,8 @@ the standard gitweb:
 
 	git log gitweb-latest..$(git subtree split --prefix=gitweb)
 
-EXAMPLE 3. Extract a subtree using branch
------------------------------------------
+EXAMPLE 3. Extract a subtree using branch as one-off
+----------------------------------------------------
 Suppose you have a source directory with many files and
 subdirectories, and you want to extract the lib directory to its own
 git project. Here's a short way to do it:
@@ -351,6 +362,54 @@ Then push the new branch onto the new empty repository:
 
 	$ git push <new-repo> split:master
 
+EXAMPLE 4. Continuously update and extract subtree to branch
+------------------------------------------------------------
+Based on example 3 you also have the option to extract the prefix
+over and over again as the original repository evolves and new
+split extracts are desired. It important that you use the option
+--append-info to leave the possibility for subtree to find the
+original commit from the previous splits.
+
+First, make the new repository in your repository manger or local
+like this wherever you want:
+
+	$ <go to the new location>
+	$ git init --bare
+
+Back in your original directory / repository:
+
+Export the prefix to a new branch using split command and option
+--append-info:
+
+	$ git subtree split --prefix <subdir> --branch <branch> \
+							--append-info
+
+Push the changes to new repo as master branch:
+
+	$ git push <new-repo> <branch>:master
+
+The result either option A or B is the original repository history
+and new branch <branch> based in the subset of commit affecting
+the prefix subdirectory. It can now be pushed to a new repo as
+showed in example 3.
+
+The developers keeps adding changes to the original repository
+including in the subdirectory and a new delta export can be done like
+this:
+
+Extract again the prefix to an already existing branch using split\
+command and options --onto and --append-info:
+
+	$ git fetch <new-repo> master
+	$ git subtree split --prefix <subdir> --branch <branch> \
+					--onto <branch> --append-info
+
+The result is now the --branch <branch> --onto <branch> has been
+updated with the new commits
+
+Push the updated branch to new repo as master branch:
+
+	$ git push <new-repo> <branch>:master
 
 AUTHOR
 ------
