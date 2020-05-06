@@ -23,6 +23,7 @@ P,prefix=      the name of the subdir to split out
 m,message=     use the given message as the commit message for the merge commit
  options for 'split'
 annotate=      add a prefix to commit message of new commits
+append-info    append the subdir and original commit sha1 to the split commit msg
 b,branch=      create a new branch from the split subtree
 ignore-joins   ignore prior --rejoin commits
 onto=          try connecting new tree to an existing one
@@ -47,6 +48,8 @@ onto=
 rejoin=
 ignore_joins=
 annotate=
+append_info=
+append_info_default=1
 squash=
 message=
 prefix=
@@ -111,6 +114,14 @@ do
 		;;
 	--no-annotate)
 		annotate=
+		;;
+	--append-info)
+		append_info_default=
+		append_info=1
+		;;
+	--no-append-info)
+		append_info_default=
+		append_info=
 		;;
 	-b)
 		branch="$1"
@@ -433,6 +444,11 @@ copy_commit () {
 		(
 			printf "%s" "$annotate"
 			cat
+			if test -n "$append_info"
+			then
+			    printf "\ngit-subtree-dir: %s" "$dir"
+			    printf "\ngit-subtree-mainline: %s" "$1"
+			fi
 		) |
 		git commit-tree "$2" $3  # reads the rest of stdin
 	) || die "Can't copy commit $1"
