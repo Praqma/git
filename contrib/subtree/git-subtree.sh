@@ -78,7 +78,12 @@ say () {
 progress () {
 	if test -z "$quiet"
 	then
-		printf "%s\r" "$*" >&2
+		if test -t 0
+		then
+			printf "%s\r" "$*" >&2
+		else
+			printf "%s\n" "$*" >&2
+		fi
 	fi
 	final_progress="$*"
 }
