@@ -36,6 +36,7 @@ squash        merge subtree changes as a single commit
 eval "$(echo "$OPTS_SPEC" | git rev-parse --parseopt -- "$@" || echo exit $?)"
 
 PATH=$PATH:$(git --exec-path)
+PATH=$PATH:$( git --exec-path | sed -e 's/C:/\/c/')
 . git-sh-setup
 
 require_work_tree
