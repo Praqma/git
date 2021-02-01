@@ -918,8 +918,8 @@ cmd_split () {
 		then
 			if rev_exists "$onto"
 			then
-				say "Reading history for --onto branch: $onto and branches with pattern: $prefix/* "
-				git rev-list $onto $( git branch -l "$prefix/*" ) |
+				say "Reading history for --onto branch: $onto and branches with pattern: [<remote>/]$prefix/* "
+				git rev-list $onto $( git branch -l "$prefix/*" ) $( git branch -r -l "*/$prefix/*" ) |
 					while read sub
 					do
 						# the 'onto' history is already just the subdir, so
