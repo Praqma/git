@@ -9,12 +9,13 @@ then
 	set -- -h
 fi
 OPTS_SPEC="\
-git subtree add   --prefix=<prefix> <commit>
-git subtree add   --prefix=<prefix> <repository> <ref>
-git subtree merge --prefix=<prefix> <commit>
-git subtree pull  --prefix=<prefix> <repository> <ref>
-git subtree push  --prefix=<prefix> <repository> <ref>
-git subtree split --prefix=<prefix> <commit>
+git subtree add    --prefix=<prefix> <commit>
+git subtree add    --prefix=<prefix> <repository> <ref>
+git subtree merge  --prefix=<prefix> <commit>
+git subtree pull   --prefix=<prefix> <repository> <ref>
+git subtree push   --prefix=<prefix> <repository> <ref>
+git subtree split  --prefix=<prefix> <commit>
+git subtree lookup --prefix=<prefix> --branch=<branch>
 --
 h,help         show the help
 q              quiet
@@ -24,7 +25,7 @@ m,message=     use the given message as the commit message for the merge commit
  options for 'split'
 lookupmode     use this option to optimize for incremental splits and histories without add and rejoin
 annotate=      add a prefix to commit message of new commits
-append-info    append the subdir and original commit sha1 to the split commit msg
+append-info    append the subdir/prefix and original commit sha1 to the split commit msg
 b,branch=      create a new branch from the split subtree
 ignore-joins   ignore prior --rejoin commits
 onto=          try connecting new tree to an existing one
@@ -199,12 +200,13 @@ add|merge|pull)
 split|push)
 	default="--default HEAD"
 	;;
+lookup) ;;
 *)
 	die "Unknown command '$command'"
 	;;
 esac
 
-if test -z "$prefix"
+if test -z "$prefix" -a !$command = "lookup"
 then
 	die "You must provide the --prefix option."
 fi
@@ -214,13 +216,16 @@ add)
 	test -e "$prefix" &&
 		die "prefix '$prefix' already exists."
 	;;
+lookup)
+	test -z "$branch" && die "-b / --branch is not given"
+	test -z "$prefix" && die "-P / --prefix is not given"
+	;;
 *)
 	test -e "$prefix" ||
 		die "'$prefix' does not exist; use 'git subtree add'"
 	;;
 esac
 
-dir="$(dirname "$prefix/.")"
 case "$mode" in
 lookup)
 	debug  "lookupmode selected"
@@ -231,6 +236,10 @@ lookup)
 esac
 
 
+if ! test "$command" = "lookup"
+then
+	dir="$(dirname "$prefix/.")"
+fi
 
 if test -n "$revlist_dir_options"
 then
@@ -240,7 +249,8 @@ fi
 
 if test "$command" != "pull" &&
 		test "$command" != "add" &&
-		test "$command" != "push"
+		test "$command" != "push" &&
+		test "$command" != "lookup"
 then
 	revs=$(git rev-parse $default --revs-only "$@") || exit $?
 	dirs=$(git rev-parse --no-revs --no-flags "$@") || exit $?
@@ -1062,5 +1072,22 @@ cmd_push () {
 		die "'$dir' must already exist. Try 'git subtree add'."
 	fi
 }
+
+cmd_lookup () {
+	rev_exists $branch || die "ERROR: The branch does not exist: $branch"
+	say "The head of branch: $branch is:"
+	git log -1 --decorate --oneline $branch
+	mains=$(find_existing_splits_from_onto_branch_history $branch)
+	say ""
+	test -z $mains && die "ERROR: Could not find original commit in any branch with subdir/prefix=$prefix. Is the prefix correct?"
+	say "The commit on original branch(es):"
+	for main in "$mains"
+	do
+		git log -1 --decorate --oneline $main
+		git branch -a --contains $main
+		say
+	done
+}
+
 
 "cmd_$command" "$@"
