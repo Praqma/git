@@ -22,6 +22,7 @@ d              show debug messages
 P,prefix=      the name of the subdir to split out
 m,message=     use the given message as the commit message for the merge commit
  options for 'split'
+lookupmode     use this option to optimize for incremental splits and histories without add and rejoin
 annotate=      add a prefix to commit message of new commits
 append-info    append the subdir and original commit sha1 to the split commit msg
 b,branch=      create a new branch from the split subtree
@@ -55,6 +56,7 @@ squash=
 message=
 prefix=
 final_progress=
+mode=
 
 # We can't restrict rev-list to only $dir here, because some of our
 # parents have the $dir contents the root, and those won't match.
@@ -141,6 +143,9 @@ do
 		message="$1"
 		shift
 		;;
+	--lookupmode)
+		mode="lookup"
+		;;
 	--no-prefix)
 		prefix=
 		;;
@@ -216,10 +221,21 @@ add)
 esac
 
 dir="$(dirname "$prefix/.")"
+case "$mode" in
+lookup)
+	debug  "lookupmode selected"
+	;;
+*)
+	debug "mode: using original mode expecting a previous add or rejoin"
+	;;
+esac
+
+
 
 if test -n "$revlist_dir_options"
 then
 	revlist_dir_options="-- $dir"
+	say "revlist_dir_options=$revlist_dir_options"
 fi
 
 if test "$command" != "pull" &&
@@ -298,7 +314,7 @@ cache_set () {
 		test "$oldrev" != "latest_new" &&
 		test -e "$cachedir/$oldrev"
 	then
-		die "cache for $oldrev already exists!"
+		die "cache for $oldrev already exists! ( $(cache_get $oldrev) )"
 	fi
 	echo "$newrev" >"$cachedir/$oldrev"
 }
@@ -599,6 +615,7 @@ copy_or_skip () {
 	p=
 	gotparents=
 	copycommit=
+
 	for parent in $newparents
 	do
 		ptree=$(toptree_for_commit $parent) || exit $?
@@ -705,43 +722,36 @@ process_split_commit () {
 	fi
 	createcount=$(($createcount + 1))
 	debug "  parents: $parents"
-	if test -n $onto
+	if test $mode = "lookup"
 	then
-		if rev_exists "$onto"
+		if test -n $onto
 		then
-	        parents_mainline=$(cache_get $parents)
-			for parent in "$parents_mainline"
-			do
-				grep_format="^git-subtree-dir:"
-				git log --grep="$grep_format" \
-					--no-show-signature --pretty=format:'START %H%n%s%n%n%b%nEND%n' $onto |
-				while read a b junk
+			if rev_exists "$onto"
+			then
+				parents_mainline=$(cache_get $parents)
+				for parent in "$parents_mainline"
 				do
-					case "$a" in
-					START)
-						sub="$b"
-						;;
-					git-subtree-mainline:)
-						main="$(git rev-parse "$b")" ||
-							die "could not rev-parse split hash $b from commit $sub"
-						;;
-					END)
-						if test -n "$main" -a -n "$sub"
-						then
-							debug "  Mainline: $main -> $onto: $sub"
-							cache_remove $main
-							cache_set $main $sub || die "already exists"
-						else
-							die "  Could not read: $main -> $sub"
-						fi
-						main=
-						sub=
-						;;
-					esac
+					git rev-list $onto $( git branch -l "$prefix/*" ) |
+						while read sub
+						do
+							# the 'onto' history is already just the subdir, so
+							# any parent we find there can be used verbatim
+							mainline=$(find_existing_splits_from_onto_branch_history $sub)
+							debug "  Mainline: $mainline -> parent: $parent"
+							if test "$mainline" = "$parent"
+							then
+								debug "  Mainline: $mainline -> --onto: $sub"
+								cache_set $mainline $sub || die "already exists"
+							fi
+							mainline=
+							sub=
+						done
 				done
-			done
+			else
+				newparents=$(cache_get $parents)
+			fi
 		else
-			newparents=$(cache_get $parents)
+			check_parents "$parents" "$indent"
 		fi
 	else
 		check_parents "$parents" "$indent"
@@ -769,6 +779,50 @@ process_split_commit () {
 	cache_set "$rev" "$newrev"
 	cache_set latest_new "$newrev"
 	cache_set latest_old "$rev"
+}
+
+find_existing_splits_from_onto_branch_history () {
+	# This function finds the original commit in HEAD history from a previously split --branch <branch> but without
+	# prior subtree add or split --rejoin commands  hence there is no merge commit.
+	sub=$(git rev-parse $1) || die "Could not parse $1"
+	metadata_commit_split=$(git log -1 --format='%ae%ce%at%ct' $sub )
+	treeobjecthash=$(git rev-parse $sub^{tree})
+	git log --all --format='%H %ae%ce%at%ct' -- "$prefix/" | grep -o -E -e "^[0-9a-f]{40} ${metadata_commit_split}" | cut -d ' ' -f 1 |
+		while read main
+		do
+			if test "$main" = "$sub"
+			then
+				# if we find "ourselves" - we skip it..
+				debug " main: $main and sub = $sub - skib"
+				break
+			fi
+			SAVEIFS=$IFS
+			IFS=$(echo -en "\n\b")
+			for treeline in $(git rev-parse $main^{tree} )
+			do
+				 if git ls-tree -d -r --full-tree "${treeline}" | grep "${treeobjecthash}" | cut -d $'\t' -f 2- | grep -q "^${prefix}$"
+				then
+					metadata_commit_orig=$(git log -1 --format='%ae%ce%at%ct' $main)
+					debug "$metadata_commit_orig == $metadata_commit_split"
+					if test "$metadata_commit_orig" == "$metadata_commit_split"
+					then
+						debug "Found: $metadata_commit_orig ( original: $main -> split: $sub )"
+						printf "$main"
+						found="true"
+						break
+					else
+						debug "Tree object found, but not metadata does not match hence not the correct commit - continue"
+					fi
+				else
+					debug "Could not find the mainline commit related to the subdir/prefix: $prefix"
+				fi
+			done
+			if test "$found" = "true"
+			then
+				break
+			fi
+		done
+	IFS="${SAVEIFS}"
 }
 
 cmd_add () {
@@ -848,25 +902,41 @@ cmd_split () {
 	debug "Splitting $dir..."
 	cache_setup || exit $?
 
-	if test -n "$onto"
+	if test "$mode" = "lookup"
 	then
-		if rev_exists "$onto"
+		if test -n "$onto"
 		then
-			debug "Reading history for --onto=$onto..."
-			git rev-list $onto |
-				while read rev
-				do
-					# the 'onto' history is already just the subdir, so
-					# any parent we find there can be used verbatim
-					debug "  cache: $rev"
-					cache_set "$rev" "$rev"
-				done
-			revs=$(git log -1 $onto | grep "    git-subtree-mainline: " | awk -F ": " '{print $2}')
-			revs="${revs}.."
-		else
-			debug "--onto=${onto} branch does not exist - skip listing commits to cache"
-			unrevs="$(find_existing_splits "$dir" "$revs")"
+			if rev_exists "$onto"
+			then
+				say "Reading history for --onto branch: $onto and branches with pattern: $prefix/* "
+				git rev-list $onto $( git branch -l "$prefix/*" ) |
+					while read sub
+					do
+						# the 'onto' history is already just the subdir, so
+						# any parent we find there can be used verbatim
+						debug "  cache: $sub"
+						cache_set $sub $sub
+						main=$(find_existing_splits_from_onto_branch_history $sub)
+						if test "$main" = ""
+						then
+							die "We could not find any commits in original branches"
+						else
+							cache_set "$main" "$sub"
+						fi
+						main=
+						sub=
+					done
+				say "Finding last split point from HEAD of $onto branch"
+				revs=$(find_existing_splits_from_onto_branch_history $onto)
+				debug " Found: $revs"
+				revs="${revs}.." # This is import in order list only new commits that needs to be copied
+			else
+				say "--onto=${onto} branch does not exist - skip listing commits to cache - finding splits from add, pull or rejoin command"
+				unrevs="$(find_existing_splits "$dir" "$revs")"
+			fi
 		fi
+	else
+		unrevs="$(find_existing_splits "$dir" "$revs")"
 	fi
 
 	grl='git rev-list --topo-order --reverse --parents $revs $unrevs $revlist_dir_options'
