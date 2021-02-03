@@ -937,9 +937,9 @@ cmd_split () {
 						sub=
 					done
 				say "Finding last split point from HEAD of $onto branch"
-				revs=$(find_existing_splits_from_onto_branch_history $onto)
-				debug " Found: $revs"
-				revs="${revs}.." # This is import in order list only new commits that needs to be copied
+				unrevs=$(find_existing_splits_from_onto_branch_history $onto)
+				debug " Found: $unrevs"
+				unrevs="^${unrevs}" # This is import in order list only new commits that needs to be copied
 			else
 				say "--onto=${onto} branch does not exist - skip listing commits to cache - finding splits from add, pull or rejoin command"
 				unrevs="$(find_existing_splits "$dir" "$revs")"
