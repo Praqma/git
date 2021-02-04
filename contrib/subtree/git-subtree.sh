@@ -241,12 +241,6 @@ then
 	dir="$(dirname "$prefix/.")"
 fi
 
-if test -n "$revlist_dir_options"
-then
-	revlist_dir_options="-- $dir"
-	say "revlist_dir_options=$revlist_dir_options"
-fi
-
 if test "$command" != "pull" &&
 		test "$command" != "add" &&
 		test "$command" != "push" &&
@@ -259,6 +253,12 @@ then
 	then
 		die "Error: Use --prefix instead of bare filenames."
 	fi
+fi
+
+if test -n "$revlist_dir_options"
+then
+	revlist_dir_options="-- $dir"
+	say "revlist_dir_options=$revlist_dir_options"
 fi
 
 debug "command: {$command}"
@@ -834,6 +834,49 @@ find_existing_splits_from_onto_branch_history () {
 		done
 	IFS="${SAVEIFS}"
 }
+find_existing_splits_from_onto_branch_history () {
+	# This function finds the original commit in HEAD history from a previously split --branch <branch> but without
+	# prior subtree add or split --rejoin commands  hence there is no merge commit.
+	sub=$(git rev-parse $1) || die "Could not parse $1"
+	metadata_commit_split=$(git log -1 --format='%ae%ce%at%ct' $sub )
+	treeobjecthash=$(git rev-parse $sub^{tree})
+	git log --all --format='%H %ae%ce%at%ct' -- "$prefix/" | grep -o -E -e "^[0-9a-f]{40} ${metadata_commit_split}" | cut -d ' ' -f 1 |
+		while read main
+		do
+			if test "$main" = "$sub"
+			then
+				# if we find "ourselves" - we skip it..
+				debug " main: $main and sub = $sub - skib"
+				break
+			fi
+			SAVEIFS=$IFS
+			IFS=$(echo -en "\n\b")
+			for treeline in $(git rev-parse $main^{tree} )
+			do
+				 if git ls-tree -d -r --full-tree "${treeline}" | grep "${treeobjecthash}" | cut -d $'\t' -f 2- | grep -q "^${prefix}$"
+				then
+					metadata_commit_orig=$(git log -1 --format='%ae%ce%at%ct' $main)
+					debug "$metadata_commit_orig == $metadata_commit_split"
+					if test "$metadata_commit_orig" == "$metadata_commit_split"
+					then
+						debug "Found: $metadata_commit_orig ( original: $main -> split: $sub )"
+						printf "$main"
+						found="true"
+						break
+					else
+						debug "Tree object found, but not metadata does not match hence not the correct commit - continue"
+					fi
+				else
+					debug "Could not find the mainline commit related to the subdir/prefix: $prefix"
+				fi
+			done
+			if test "$found" = "true"
+			then
+				break
+			fi
+		done
+	IFS="${SAVEIFS}"
+}
 
 cmd_add () {
 	if test -e "$dir"
@@ -918,8 +961,23 @@ cmd_split () {
 		then
 			if rev_exists "$onto"
 			then
-				say "Reading history for --onto branch: $onto and branches with pattern: [<remote>/]$prefix/* "
-				git rev-list $onto $( git branch -l "$prefix/*" ) $( git branch -r -l "*/$prefix/*" ) |
+				say "Finding last split point from HEAD of $onto branch"
+				unrevs=$(find_existing_splits_from_onto_branch_history $onto)
+				debug " Found: $unrevs"
+				unrevs="^${unrevs}"
+
+				oldest_hash_of_this_split=$(   git log --no-show-signature --date-order --format="%H"  --parents $revs $unrevs | tail -1 )
+				if test -z $oldest_hash_of_this_split
+				then
+					say "No new revisions were found - no actions - just exit"
+					exit 0
+				fi
+				oldest_hash_of_this_split_p=$( git rev-list --date-order --reverse  --parents $oldest_hash_of_this_split | tail -1 | cut -f 2- -d ' ')
+				oldest_date_main_p=$(git log --no-show-signature --format="%ct" $oldest_hash_of_this_split_p -1 )
+				say "OldH-P $oldest_hash_of_this_split_p : $oldest_date_main_p"
+				onto_count=$(git rev-list --after=$oldest_date_main_p $onto $( git branch -l "$prefix/*" ) $( git branch -r -l "*/$prefix/*" ) | wc -l)
+				say "Reading history for --onto branch: $onto and branches with pattern: [<remote>/]$prefix/* ( ${onto_count:-0} ) "
+				git rev-list --after=$oldest_date_main_p $onto $( git branch -l "$prefix/*" ) $( git branch -r -l "*/$prefix/*" ) |
 					while read sub
 					do
 						# the 'onto' history is already just the subdir, so
@@ -936,10 +994,6 @@ cmd_split () {
 						main=
 						sub=
 					done
-				say "Finding last split point from HEAD of $onto branch"
-				unrevs=$(find_existing_splits_from_onto_branch_history $onto)
-				debug " Found: $unrevs"
-				unrevs="^${unrevs}" # This is import in order list only new commits that needs to be copied
 			else
 				say "--onto=${onto} branch does not exist - skip listing commits to cache - finding splits from add, pull or rejoin command"
 				unrevs="$(find_existing_splits "$dir" "$revs")"
@@ -950,6 +1004,9 @@ cmd_split () {
 	fi
 
 	grl='git rev-list --topo-order --reverse --parents $revs $unrevs $revlist_dir_options'
+	echo $grl
+	eval $grl
+
 	revmax=$(eval "$grl" | wc -l)
 	revcount=0
 	createcount=0
