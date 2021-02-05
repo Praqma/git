@@ -226,14 +226,6 @@ lookup)
 	;;
 esac
 
-case "$mode" in
-lookup)
-	debug  "lookupmode selected"
-	;;
-*)
-	debug "mode: using original mode expecting a previous add or rejoin"
-	;;
-esac
 
 
 if ! test "$command" = "lookup"
@@ -258,7 +250,11 @@ fi
 if test -n "$revlist_dir_options"
 then
 	revlist_dir_options="-- $dir"
-	say "revlist_dir_options=$revlist_dir_options"
+fi
+
+if test -z "$mode"
+then
+	mode="add-pull-rejoin"
 fi
 
 debug "command: {$command}"
@@ -266,7 +262,14 @@ debug "quiet: {$quiet}"
 debug "revs: {$revs}"
 debug "dir: {$dir}"
 debug "opts: {$*}"
+debug "revlist_dir_options: {$revlist_dir_options}"
+debug "mode: {$mode}"
 debug
+
+if test "$mode" = "add-pull-rejoin"
+then
+	debug "mode: using original mode expecting a previous add, pull or rejoin"
+fi
 
 cache_setup () {
 	cachedir="$GIT_DIR/subtree-cache/$$"
@@ -974,9 +977,9 @@ cmd_split () {
 				fi
 				oldest_hash_of_this_split_p=$( git rev-list --date-order --reverse  --parents $oldest_hash_of_this_split | tail -1 | cut -f 2- -d ' ')
 				oldest_date_main_p=$(git log --no-show-signature --format="%ct" $oldest_hash_of_this_split_p -1 )
-				say "OldH-P $oldest_hash_of_this_split_p : $oldest_date_main_p"
+				debug  "OldH-P $oldest_hash_of_this_split_p : $oldest_date_main_p / $(date --date=@$oldest_date_main_p +%FT%R)"
 				onto_count=$(git rev-list --after=$oldest_date_main_p $onto $( git branch -l "$prefix/*" ) $( git branch -r -l "*/$prefix/*" ) | wc -l)
-				say "Reading history for --onto branch: $onto and branches with pattern: [<remote>/]$prefix/* ( ${onto_count:-0} ) "
+				say "Reading history newer than $(date --date=@$oldest_date_main_p +%FT%R) for --onto branch: $onto and branches with pattern: [<remote>/]$prefix/* ( ${onto_count:-0} ) "
 				git rev-list --after=$oldest_date_main_p $onto $( git branch -l "$prefix/*" ) $( git branch -r -l "*/$prefix/*" ) |
 					while read sub
 					do
@@ -1004,9 +1007,15 @@ cmd_split () {
 	fi
 
 	grl='git rev-list --topo-order --reverse --parents $revs $unrevs $revlist_dir_options'
-	echo $grl
-	eval $grl
-
+	debug $grl
+	if test -n "$debug"
+	then
+		debug "Raw rev-list to process:"
+		set -x
+		eval $grl
+		set +x
+		debug
+	fi
 	revmax=$(eval "$grl" | wc -l)
 	revcount=0
 	createcount=0
@@ -1050,7 +1059,7 @@ cmd_split () {
 			"refs/heads/$branch" "$latest_new" || exit $?
 		say "$action branch '$branch'"
 	fi
-	echo "$latest_new"
+	say  "$latest_new"
 	exit 0
 }
 
