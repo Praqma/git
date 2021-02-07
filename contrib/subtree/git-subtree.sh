@@ -733,6 +733,16 @@ process_split_commit () {
 		debug "  prior: $exists"
 		return
 	fi
+	if test $mode = "lookup"
+	then
+		exists=$(find_existing_split_commit_from_main_history $rev)
+		if test -n "$exists"
+		then
+			debug "  prior-lookup: $exists"
+			return
+		fi
+	fi
+
 	createcount=$(($createcount + 1))
 	debug "  parents: $parents"
 	if test $mode = "lookup"
@@ -741,26 +751,23 @@ process_split_commit () {
 		then
 			if rev_exists "$onto"
 			then
-				parents_mainline=$(cache_get $parents)
-				for parent in "$parents_mainline"
+				for parent in $parents
 				do
-					git rev-list $onto $( git branch -l "$prefix/*" ) |
-						while read sub
-						do
-							# the 'onto' history is already just the subdir, so
-							# any parent we find there can be used verbatim
-							mainline=$(find_existing_splits_from_onto_branch_history $sub)
-							debug "  Mainline: $mainline -> parent: $parent"
-							if test "$mainline" = "$parent"
-							then
-								debug "  Mainline: $mainline -> --onto: $sub"
-								cache_set $mainline $sub || die "already exists"
-							fi
-							mainline=
-							sub=
-						done
+					parent_sub=$(cache_get $parent)
+					if test -n "$parent_sub"
+					then
+						say "OK: parent: main: $parent -> sub: $parent_sub"
+					else
+						sub_p=$(find_existing_split_commit_from_main_history $parent)
+						if test -z $sub_p
+						then
+							die "Seems that parent have not been split prior - something is wrong"
+						else
+							debug "  Mainline: $parent -> --onto: $onto: $sub_p"
+							cache_set $parent $sub_p || die "already exists"
+						fi
+					fi
 				done
-			else
 				newparents=$(cache_get $parents)
 			fi
 		else
@@ -799,21 +806,15 @@ find_existing_splits_from_onto_branch_history () {
 	# prior subtree add or split --rejoin commands  hence there is no merge commit.
 	sub=$(git rev-parse $1) || die "Could not parse $1"
 	metadata_commit_split=$(git log -1 --format='%ae%ce%at%ct' $sub )
-	treeobjecthash=$(git rev-parse $sub^{tree})
-	git log --all --format='%H %ae%ce%at%ct' -- "$prefix/" | grep -o -E -e "^[0-9a-f]{40} ${metadata_commit_split}" | cut -d ' ' -f 1 |
+	treeobjecthash=$( toptree_for_commit $sub )
+	git log --all --format='%H %ae%ce%at%ct' -- "$prefix/" | grep -v "^$sub"  | grep -o -E -e "^[0-9a-f]{40} ${metadata_commit_split}" | cut -d ' ' -f 1 |
 		while read main
 		do
-			if test "$main" = "$sub"
-			then
-				# if we find "ourselves" - we skip it..
-				debug " main: $main and sub = $sub - skib"
-				break
-			fi
 			SAVEIFS=$IFS
 			IFS=$(echo -en "\n\b")
-			for treeline in $(git rev-parse $main^{tree} )
+			for treeline in $( toptree_for_commit $main )
 			do
-				 if git ls-tree -d -r --full-tree "${treeline}" | grep "${treeobjecthash}" | cut -d $'\t' -f 2- | grep -q "^${prefix}$"
+				if git ls-tree -d -r --full-tree "${treeline}" | grep "${treeobjecthash}" | cut -d $'\t' -f 2- | grep -q "^${prefix}$"
 				then
 					metadata_commit_orig=$(git log -1 --format='%ae%ce%at%ct' $main)
 					debug "$metadata_commit_orig == $metadata_commit_split"
@@ -837,48 +838,24 @@ find_existing_splits_from_onto_branch_history () {
 		done
 	IFS="${SAVEIFS}"
 }
-find_existing_splits_from_onto_branch_history () {
-	# This function finds the original commit in HEAD history from a previously split --branch <branch> but without
-	# prior subtree add or split --rejoin commands  hence there is no merge commit.
-	sub=$(git rev-parse $1) || die "Could not parse $1"
-	metadata_commit_split=$(git log -1 --format='%ae%ce%at%ct' $sub )
-	treeobjecthash=$(git rev-parse $sub^{tree})
-	git log --all --format='%H %ae%ce%at%ct' -- "$prefix/" | grep -o -E -e "^[0-9a-f]{40} ${metadata_commit_split}" | cut -d ' ' -f 1 |
-		while read main
+find_existing_split_commit_from_main_history () {
+	# This function finds the split commit history from a previously split of prefix
+	main=$(git rev-parse $1) || die "Could not parse $1"
+	metadata_commit_split=$(git log -1 --format='%ae%ce%at%ct' $main )
+
+	treeobjecthash_main=$( toptree_for_commit $main )
+	treeobjecthash_main_prefix=$(git ls-tree -d -r --full-tree "${treeobjecthash_main}" | grep -E $'\t'"${prefix}$" | cut -d $'\t' -f 1 | cut -d ' ' -f 3 )
+	debug "$(git log --all --format='%H %ae%ce%at%ct' | grep -v "^$main" | grep -o -E "^[0-9a-f]{40} ${metadata_commit_split}" )"
+	git log --all --format='%H %ae%ce%at%ct' | grep -v "^$main" | grep -o -E "^[0-9a-f]{40} ${metadata_commit_split}" | cut -d ' ' -f 1 |
+		while read sub
 		do
-			if test "$main" = "$sub"
+			treeobjecthash_sub=$( toptree_for_commit $sub )
+			if test $treeobjecthash_main_prefix = $treeobjecthash_sub
 			then
-				# if we find "ourselves" - we skip it..
-				debug " main: $main and sub = $sub - skib"
-				break
-			fi
-			SAVEIFS=$IFS
-			IFS=$(echo -en "\n\b")
-			for treeline in $(git rev-parse $main^{tree} )
-			do
-				 if git ls-tree -d -r --full-tree "${treeline}" | grep "${treeobjecthash}" | cut -d $'\t' -f 2- | grep -q "^${prefix}$"
-				then
-					metadata_commit_orig=$(git log -1 --format='%ae%ce%at%ct' $main)
-					debug "$metadata_commit_orig == $metadata_commit_split"
-					if test "$metadata_commit_orig" == "$metadata_commit_split"
-					then
-						debug "Found: $metadata_commit_orig ( original: $main -> split: $sub )"
-						printf "$main"
-						found="true"
-						break
-					else
-						debug "Tree object found, but not metadata does not match hence not the correct commit - continue"
-					fi
-				else
-					debug "Could not find the mainline commit related to the subdir/prefix: $prefix"
-				fi
-			done
-			if test "$found" = "true"
-			then
+				git rev-parse --verify $sub
 				break
 			fi
 		done
-	IFS="${SAVEIFS}"
 }
 
 cmd_add () {
@@ -980,7 +957,8 @@ cmd_split () {
 				debug  "OldH-P $oldest_hash_of_this_split_p : $oldest_date_main_p / $(date --date=@$oldest_date_main_p +%FT%R)"
 				onto_count=$(git rev-list --after=$oldest_date_main_p $onto $( git branch -l "$prefix/*" ) $( git branch -r -l "*/$prefix/*" ) | wc -l)
 				say "Reading history newer than $(date --date=@$oldest_date_main_p +%FT%R) for --onto branch: $onto and branches with pattern: [<remote>/]$prefix/* ( ${onto_count:-0} ) "
-				git rev-list --after=$oldest_date_main_p $onto $( git branch -l "$prefix/*" ) $( git branch -r -l "*/$prefix/*" ) |
+#				git rev-list --after=$oldest_date_main_p $onto $( git branch -l "$prefix/*" ) $( git branch -r -l "*/$prefix/*" ) |
+				git rev-parse $onto |
 					while read sub
 					do
 						# the 'onto' history is already just the subdir, so
