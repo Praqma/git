@@ -942,39 +942,12 @@ cmd_split () {
 			if rev_exists "$onto"
 			then
 				say "Finding last split point from HEAD of $onto branch"
-				unrevs=$(find_existing_splits_from_onto_branch_history $onto)
-				debug " Found: $unrevs"
-				unrevs="^${unrevs}"
+				main=$(find_existing_splits_from_onto_branch_history $onto)
+				debug " Found: $main"
+				unrevs="^${main}"
 
-				oldest_hash_of_this_split=$(   git log --no-show-signature --date-order --format="%H"  --parents $revs $unrevs | tail -1 )
-				if test -z $oldest_hash_of_this_split
-				then
-					say "No new revisions were found - no actions - just exit"
-					exit 0
-				fi
-				oldest_hash_of_this_split_p=$( git rev-list --date-order --reverse  --parents $oldest_hash_of_this_split | tail -1 | cut -f 2- -d ' ')
-				oldest_date_main_p=$(git log --no-show-signature --format="%ct" $oldest_hash_of_this_split_p -1 )
-				debug  "OldH-P $oldest_hash_of_this_split_p : $oldest_date_main_p / $(date --date=@$oldest_date_main_p +%FT%R)"
-				onto_count=$(git rev-list --after=$oldest_date_main_p $onto $( git branch -l "$prefix/*" ) $( git branch -r -l "*/$prefix/*" ) | wc -l)
-				say "Reading history newer than $(date --date=@$oldest_date_main_p +%FT%R) for --onto branch: $onto and branches with pattern: [<remote>/]$prefix/* ( ${onto_count:-0} ) "
-#				git rev-list --after=$oldest_date_main_p $onto $( git branch -l "$prefix/*" ) $( git branch -r -l "*/$prefix/*" ) |
-				git rev-parse $onto |
-					while read sub
-					do
-						# the 'onto' history is already just the subdir, so
-						# any parent we find there can be used verbatim
-						debug "  cache: $sub"
-						cache_set $sub $sub
-						main=$(find_existing_splits_from_onto_branch_history $sub)
-						if test "$main" = ""
-						then
-							die "We could not find any commits in original branches"
-						else
-							cache_set "$main" "$sub"
-						fi
-						main=
-						sub=
-					done
+				sub=$(git rev-parse $onto)
+				cache_set "$main" "$sub"
 			else
 				say "--onto=${onto} branch does not exist - skip listing commits to cache - finding splits from add, pull or rejoin command"
 				unrevs="$(find_existing_splits "$dir" "$revs")"
