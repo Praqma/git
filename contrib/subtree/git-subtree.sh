@@ -332,14 +332,6 @@ cache_set () {
 	echo "$newrev" >"$cachedir/$oldrev"
 }
 
-cache_remove () {
-	rev="$1"
-	if test -e "$cachedir/$rev"
-	then
-		rm "$cachedir/$rev"
-	fi
-}
-
 rev_exists () {
 	if git rev-parse "$1" >/dev/null 2>&1
 	then
@@ -747,29 +739,26 @@ process_split_commit () {
 	debug "  parents: $parents"
 	if test $mode = "lookup"
 	then
-		if test -n $onto
+		if test -n $onto && rev_exists "$onto"
 		then
-			if rev_exists "$onto"
-			then
-				for parent in $parents
-				do
-					parent_sub=$(cache_get $parent)
-					if test -n "$parent_sub"
+			for parent in $parents
+			do
+				parent_sub=$(cache_get $parent)
+				if test -n "$parent_sub"
+				then
+					debug  " Already cached: main: $parent -> sub: $parent_sub"
+				else
+					sub_p=$(find_existing_split_commit_from_main_history $parent)
+					if test -z $sub_p
 					then
-						say "OK: parent: main: $parent -> sub: $parent_sub"
+						die "Seems that parent have not been split prior - something is wrong"
 					else
-						sub_p=$(find_existing_split_commit_from_main_history $parent)
-						if test -z $sub_p
-						then
-							die "Seems that parent have not been split prior - something is wrong"
-						else
-							debug "  Mainline: $parent -> --onto: $onto: $sub_p"
-							cache_set $parent $sub_p || die "already exists"
-						fi
+						debug "  Mainline: $parent -> --onto: $onto: $sub_p - cache set"
+						cache_set $parent $sub_p || die "already exists"
 					fi
-				done
-				newparents=$(cache_get $parents)
-			fi
+				fi
+			done
+			newparents=$(cache_get $parents)
 		else
 			check_parents "$parents" "$indent"
 		fi
@@ -807,37 +796,24 @@ find_existing_splits_from_onto_branch_history () {
 	sub=$(git rev-parse $1) || die "Could not parse $1"
 	metadata_commit_split=$(git log -1 --format='%ae%ce%at%ct' $sub )
 	treeobjecthash=$( toptree_for_commit $sub )
-	git log --all --format='%H %ae%ce%at%ct' -- "$prefix/" | grep -v "^$sub"  | grep -o -E -e "^[0-9a-f]{40} ${metadata_commit_split}" | cut -d ' ' -f 1 |
-		while read main
-		do
-			SAVEIFS=$IFS
-			IFS=$(echo -en "\n\b")
-			for treeline in $( toptree_for_commit $main )
-			do
-				if git ls-tree -d -r --full-tree "${treeline}" | grep "${treeobjecthash}" | cut -d $'\t' -f 2- | grep -q "^${prefix}$"
-				then
-					metadata_commit_orig=$(git log -1 --format='%ae%ce%at%ct' $main)
-					debug "$metadata_commit_orig == $metadata_commit_split"
-					if test "$metadata_commit_orig" == "$metadata_commit_split"
-					then
-						debug "Found: $metadata_commit_orig ( original: $main -> split: $sub )"
-						printf "$main"
-						found="true"
-						break
-					else
-						debug "Tree object found, but not metadata does not match hence not the correct commit - continue"
-					fi
-				else
-					debug "Could not find the mainline commit related to the subdir/prefix: $prefix"
-				fi
-			done
-			if test "$found" = "true"
-			then
-				break
-			fi
-		done
-	IFS="${SAVEIFS}"
+	main=$(git log --all --format='%H %ae%ce%at%ct' -- "$prefix/" | grep -v "^$sub"  | grep -o -E -e "^[0-9a-f]{40} ${metadata_commit_split}" | cut -d ' ' -f 1 )
+	if test $( echo $main_rev | wc -w ) -gt 1
+	then
+		git log --all --format='%H %ae%ce%at%ct' -- "$prefix/" | grep -v "^$sub"  | grep -o -E -e "^[0-9a-f]{40} ${metadata_commit_split}"
+		die "ERROR there are more than more commit with same meta data on revs: $revs history"
+	fi
+	treeline=$( toptree_for_commit $main )
+	if test -z $treeline
+	then
+			die "Could not find the mainline commit related to the subdir/prefix: $prefix"
+	fi
+	if git ls-tree -d -r --full-tree "${treeline}" | grep "${treeobjecthash}" | cut -d $'\t' -f 2- | grep -q "^${prefix}$"
+	then
+		debug "Found: original: $main -> split: $sub )"
+		printf "$main"
+	fi
 }
+
 find_existing_split_commit_from_main_history () {
 	# This function finds the split commit history from a previously split of prefix
 	main=$(git rev-parse $1) || die "Could not parse $1"
