@@ -30,7 +30,7 @@ b,branch=      create a new branch from the split subtree
 ignore-joins   ignore prior --rejoin commits
 onto=          try connecting new tree to an existing one
 rejoin         merge the new branch back into HEAD
-revlist-prefix Only list the commits from prefix ( Experimental )
+revlist-prefix Only list the commits from prefix [Experimental]
 
  options for 'add', 'merge' and 'pull'
 squash        merge subtree changes as a single commit
@@ -38,7 +38,7 @@ squash        merge subtree changes as a single commit
 eval "$(echo "$OPTS_SPEC" | git rev-parse --parseopt -- "$@" || echo exit $?)"
 
 PATH=$PATH:$(git --exec-path)
-PATH=$PATH:$( git --exec-path | sed -e 's/C:/\/c/')
+# PATH=$PATH:$(git --exec-path | sed -e 's/C:/\/c/')
 . git-sh-setup
 
 require_work_tree
@@ -620,7 +620,6 @@ copy_or_skip () {
 	p=
 	gotparents=
 	copycommit=
-
 	for parent in $newparents
 	do
 		ptree=$(toptree_for_commit $parent) || exit $?
@@ -792,7 +791,7 @@ process_split_commit () {
 
 find_existing_splits_from_onto_branch_history () {
 	# This function finds the original commit in HEAD history from a previously split --branch <branch> but without
-	# prior subtree add or split --rejoin commands  hence there is no merge commit.
+	# prior subtree add or split --rejoin commands, hence there is no merge commit.
 	sub=$(git rev-parse $1) || die "Could not parse $1"
 	metadata_commit_split=$(git log -1 --format='%ae%ce%at%ct' $sub )
 	treeobjecthash=$( toptree_for_commit $sub )
@@ -805,7 +804,7 @@ find_existing_splits_from_onto_branch_history () {
 	treeline=$( toptree_for_commit $main )
 	if test -z $treeline
 	then
-			die "Could not find the mainline commit related to the subdir/prefix: $prefix"
+		die "Could not find the mainline commit related to the subdir/prefix: $prefix"
 	fi
 	if git ls-tree -d -r --full-tree "${treeline}" | grep "${treeobjecthash}" | cut -d $'\t' -f 2- | grep -q "^${prefix}$"
 	then
@@ -919,7 +918,7 @@ cmd_split () {
 			then
 				say "Finding last split point from HEAD of $onto branch"
 				main=$(find_existing_splits_from_onto_branch_history $onto)
-				debug " Found: $main"
+				debug "Found: $main"
 				unrevs="^${main}"
 
 				sub=$(git rev-parse $onto)
@@ -1081,6 +1080,5 @@ cmd_lookup () {
 		say
 	done
 }
-
 
 "cmd_$command" "$@"
