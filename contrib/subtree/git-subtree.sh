@@ -796,7 +796,8 @@ find_existing_splits_from_onto_branch_history () {
 	sub=$(git rev-parse $1) || die "Could not parse $1"
 	metadata_commit_split=$(git log -1 --format='%ae%ce%at%ct' $sub )
 	treeobjecthash=$( toptree_for_commit $sub )
-	main=$(git log --all --format='%H %ae%ce%at%ct' -- "$prefix/" | grep -v "^$sub"  | grep -o -E -e "^[0-9a-f]{40} ${metadata_commit_split}" | cut -d ' ' -f 1 )
+	main_line=$(git log --all --format='%H %ae%ce%at%ct' -- "$prefix/" | grep -v "^$sub"  | grep -o -E -e "^[0-9a-f]{40} ${metadata_commit_split}")
+	main=${main_line%% *}
 	if test $( echo $main_rev | wc -w ) -gt 1
 	then
 		git log --all --format='%H %ae%ce%at%ct' -- "$prefix/" | grep -v "^$sub"  | grep -o -E -e "^[0-9a-f]{40} ${metadata_commit_split}"
@@ -807,7 +808,7 @@ find_existing_splits_from_onto_branch_history () {
 	then
 			die "Could not find the mainline commit related to the subdir/prefix: $prefix"
 	fi
-	if git ls-tree -d -r --full-tree "${treeline}" | grep "${treeobjecthash}" | cut -d $'\t' -f 2- | grep -q "^${prefix}$"
+	if git ls-tree -d -r --full-tree "${treeline}" | grep "${treeobjecthash}" | grep -q $'\t'"${prefix}$"
 	then
 		debug "Found: original: $main -> split: $sub )"
 		printf "$main"
@@ -818,12 +819,12 @@ find_existing_split_commit_from_main_history () {
 	# This function finds the split commit history from a previously split of prefix
 	main=$(git rev-parse $1) || die "Could not parse $1"
 	metadata_commit_split=$(git log -1 --format='%ae%ce%at%ct' $main )
-
 	treeobjecthash_main=$( toptree_for_commit $main )
-	treeobjecthash_main_prefix=$(git ls-tree -d -r --full-tree "${treeobjecthash_main}" | grep -E $'\t'"${prefix}$" | cut -d $'\t' -f 1 | cut -d ' ' -f 3 )
+	treeobjecthash_main_prefix_line=$(git ls-tree -d -r --full-tree "${treeobjecthash_main}" | grep -o -E "[0-9a-f]{40}"$'\t'"${prefix}$" )
+	treeobjecthash_main_prefix=${treeobjecthash_main_prefix_line%%$'\t'*}
 	debug "$(git log --all --format='%H %ae%ce%at%ct' | grep -v "^$main" | grep -o -E "^[0-9a-f]{40} ${metadata_commit_split}" )"
-	git log --all --format='%H %ae%ce%at%ct' | grep -v "^$main" | grep -o -E "^[0-9a-f]{40} ${metadata_commit_split}" | cut -d ' ' -f 1 |
-		while read sub
+	git log --all --format='%H %ae%ce%at%ct' | grep -v "^$main" | grep -o -E "^[0-9a-f]{40} ${metadata_commit_split}" |
+		while read sub sub_metadata
 		do
 			treeobjecthash_sub=$( toptree_for_commit $sub )
 			if test $treeobjecthash_main_prefix = $treeobjecthash_sub
