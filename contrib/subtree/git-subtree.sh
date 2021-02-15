@@ -15,7 +15,7 @@ git subtree merge  --prefix=<prefix> <commit>
 git subtree pull   --prefix=<prefix> <repository> <ref>
 git subtree push   --prefix=<prefix> <repository> <ref>
 git subtree split  --prefix=<prefix> <commit>
-git subtree lookup --prefix=<prefix> --branch=<branch>
+git subtree lookup --prefix=<prefix> <commit>/<ref>
 --
 h,help         show the help
 q              quiet
@@ -193,13 +193,12 @@ command="$1"
 shift
 
 case "$command" in
-add|merge|pull)
+add|merge|pull|lookup)
 	default=
 	;;
 split|push)
 	default="--default HEAD"
 	;;
-lookup) ;;
 *)
 	die "Unknown command '$command'"
 	;;
@@ -216,7 +215,7 @@ add)
 		die "prefix '$prefix' already exists."
 	;;
 lookup)
-	test -z "$branch" && die "-b / --branch is not given"
+#	test -z "$branch" && die "-b / --branch is not given"
 	test -z "$prefix" && die "-P / --prefix is not given"
 	;;
 *)
@@ -238,12 +237,16 @@ if test "$command" != "pull" &&
 		test "$command" != "lookup"
 then
 	revs=$(git rev-parse $default --revs-only "$@") || exit $?
-	dirs=$(git rev-parse --no-revs --no-flags "$@") || exit $?
 	ensure_single_rev $revs
+	dirs=$(git rev-parse --no-revs --no-flags "$@") || exit $?
 	if test -n "$dirs"
 	then
 		die "Error: Use --prefix instead of bare filenames."
 	fi
+elif test "$command" = "lookup"
+then
+	revs=$(git rev-parse $default --revs-only "$@") || exit $?
+	ensure_single_rev $revs
 fi
 
 if test -n "$revlist_dir_options"
@@ -792,9 +795,19 @@ find_existing_splits_from_onto_branch_history () {
 	# This function finds the original commit in HEAD history from a previously split --branch <branch> but without
 	# prior subtree add or split --rejoin commands, hence there is no merge commit.
 	sub=$(git rev-parse $1) || die "Could not parse $1"
+	investigation_mode=$2 || investigation_mode=""
 	metadata_commit_split=$(git log -1 --format='%ae%ce%at%ct' $sub )
 	treeobjecthash=$( toptree_for_commit $sub )
 	main_line=$(git log --all --format='%H %ae%ce%at%ct' -- "$prefix/" | grep -v "^$sub"  | grep -o -E -e "^[0-9a-f]{40} ${metadata_commit_split}")
+	if test -z "$main_line"
+	then
+		if test -n $investigation_mode
+		then
+			return
+		else
+			die "ERROR: Could not find the mainline commit: main:$main <-> sub:$sub - correct prefix=$prefix ?"
+		fi
+	fi
 	main=${main_line%% *}
 	if test $( echo $main_rev | wc -w ) -gt 1
 	then
@@ -804,7 +817,7 @@ find_existing_splits_from_onto_branch_history () {
 	treeline=$( toptree_for_commit $main )
 	if test -z $treeline
 	then
-		die "Could not find the mainline commit related to the subdir/prefix: $prefix"
+		die "ERROR: Could not find the mainline top tree related to the commit $main"
 	fi
 	if git ls-tree -d -r --full-tree "${treeline}" | grep "${treeobjecthash}" | grep -q $'\t'"${prefix}$"
 	then
@@ -1066,18 +1079,36 @@ cmd_push () {
 }
 
 cmd_lookup () {
-	rev_exists $branch || die "ERROR: The branch does not exist: $branch"
-	say "The head of branch: $branch is:"
-	git log -1 --decorate --oneline $branch
-	mains=$(find_existing_splits_from_onto_branch_history $branch)
+	rev_exists $revs || die "ERROR: The reference does not exist: $revs"
+	debug "Try to find mainline revision from $revs"
+	mains=$(find_existing_splits_from_onto_branch_history $revs "investigate" )
+	if test -z $mains
+	then
+		debug "Could not find a reference on the mainline with prefix - try to find it a meaningful relation in reverse"
+		debug "Try to find sub revision from $revs"
+		mains=$(find_existing_split_commit_from_main_history $revs)
+		if test -z $mains
+		then
+			die "ERROR: Could not find revision in any branch with subdir/prefix=$prefix. Is the prefix correct?"
+		else
+			say "INFO: Given reference/commit is in an original history"
+		fi
+	else
+		say "INFO: Given reference/commit is in the subtree history"
+	fi
+
+	say "$(git log -1 --decorate --oneline $revs)"
 	say ""
-	test -z $mains && die "ERROR: Could not find original commit in any branch with subdir/prefix=$prefix. Is the prefix correct?"
-	say "The commit on original branch(es):"
+	say "The commit on branch(es):"
 	for main in "$mains"
 	do
-		git log -1 --decorate --oneline $main
-		git branch -a --contains $main
-		say
+		if test -n "$quiet"
+		then
+			echo $main
+		else
+			say "$(git log -1 --decorate --oneline $main)"
+			say "$(git branch -a --contains $main)"
+		fi
 	done
 }
 
