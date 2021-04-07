@@ -327,6 +327,7 @@ cache_set () {
 	newrev="$2"
 	if test "$oldrev" != "latest_old" &&
 		test "$oldrev" != "latest_new" &&
+		test "$oldrev" != "latest_new_exists" &&
 		test -e "$cachedir/$oldrev"
 	then
 		die "cache for $oldrev already exists! ( $(cache_get $oldrev) )"
@@ -732,6 +733,7 @@ process_split_commit () {
 		if test -n "$exists"
 		then
 			debug "  prior-lookup: $exists"
+			cache_set latest_new_exists "$exists"
 			return
 		fi
 	fi
@@ -936,6 +938,7 @@ cmd_split () {
 
 				sub=$(git rev-parse $onto)
 				cache_set "$main" "$sub"
+				cache_set latest_new_exists "$sub"
 			else
 				say "--onto=${onto} branch does not exist - skip listing commits to cache - finding splits from add, pull or rejoin command"
 				unrevs="$(find_existing_splits "$dir" "$revs")"
@@ -967,39 +970,64 @@ cmd_split () {
 	say "$final_progress"
 
 	latest_new=$(cache_get latest_new)
+
 	if test -z "$latest_new"
 	then
-		say "No new revisions were found - no actions - just exit"
+		say "No new revisions were found"
+		if test -n "$branch"
+		then
+			latest_new_exists=$(cache_get latest_new_exists)
+			if rev_exists "refs/heads/$branch"
+			then
+				if test $revcount -gt 0
+				then
+					if ! rev_is_descendant_of_branch "$latest_new_exists" "$branch"
+					then
+						die "Branch '$branch' is not an ancestor of commit '$latest_new_exists'."
+					fi
+					action='Updated'
+				else
+					action="No change to branch '$branch'"
+					exit 0
+				fi
+			else
+				action='Created'
+			fi
+			git update-ref -m 'subtree split' \
+				"refs/heads/$branch" "$latest_new_exists" || exit $?
+			say "$action branch '$branch'"
+			exit 0
+		fi
+	else
+		if test -n "$rejoin"
+		then
+			debug "Merging split branch into HEAD..."
+			latest_old=$(cache_get latest_old)
+			git merge -s ours \
+				--allow-unrelated-histories \
+				-m "$(rejoin_msg "$dir" "$latest_old" "$latest_new")" \
+				"$latest_new" >&2 || exit $?
+		fi
+		if test -n "$branch"
+		then
+			if rev_exists "refs/heads/$branch"
+			then
+				if ! rev_is_descendant_of_branch "$latest_new" "$branch"
+				then
+					die "Branch '$branch' is not an ancestor of commit '$latest_new'."
+				fi
+				action='Updated'
+			else
+				action='Created'
+			fi
+			git update-ref -m 'subtree split' \
+				"refs/heads/$branch" "$latest_new" || exit $?
+			say "$action branch '$branch'"
+		fi
+		say  "$latest_new"
 		exit 0
 	fi
 
-	if test -n "$rejoin"
-	then
-		debug "Merging split branch into HEAD..."
-		latest_old=$(cache_get latest_old)
-		git merge -s ours \
-			--allow-unrelated-histories \
-			-m "$(rejoin_msg "$dir" "$latest_old" "$latest_new")" \
-			"$latest_new" >&2 || exit $?
-	fi
-	if test -n "$branch"
-	then
-		if rev_exists "refs/heads/$branch"
-		then
-			if ! rev_is_descendant_of_branch "$latest_new" "$branch"
-			then
-				die "Branch '$branch' is not an ancestor of commit '$latest_new'."
-			fi
-			action='Updated'
-		else
-			action='Created'
-		fi
-		git update-ref -m 'subtree split' \
-			"refs/heads/$branch" "$latest_new" || exit $?
-		say "$action branch '$branch'"
-	fi
-	say  "$latest_new"
-	exit 0
 }
 
 cmd_merge () {
