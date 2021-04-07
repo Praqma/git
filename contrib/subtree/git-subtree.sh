@@ -754,7 +754,7 @@ process_split_commit () {
 					sub_p=$(find_existing_split_commit_from_main_history $parent)
 					if test -z $sub_p
 					then
-						die "Seems that parent have not been split prior - something is wrong"
+						say "Seems that parent have not been split prior - something is wrong"
 					else
 						debug "  Mainline: $parent -> --onto: $onto: $sub_p - cache set"
 						cache_set $parent $sub_p || die "already exists"
@@ -796,6 +796,7 @@ process_split_commit () {
 find_existing_splits_from_onto_branch_history () {
 	# This function finds the original commit in HEAD history from a previously split --branch <branch> but without
 	# prior subtree add or split --rejoin commands, hence there is no merge commit.
+	#set -x
 	sub=$(git rev-parse $1) || die "Could not parse $1"
 	investigation_mode=$2 || investigation_mode=""
 	metadata_commit_split=$(git log -1 --format='%ae%ce%at%ct' $sub )
@@ -803,11 +804,29 @@ find_existing_splits_from_onto_branch_history () {
 	main_line=$(git log --all --format='%H %ae%ce%at%ct' -- "$prefix/" | grep -v "^$sub"  | grep -o -E -e "^[0-9a-f]{40} ${metadata_commit_split}")
 	if test -z "$main_line"
 	then
-		if test -n $investigation_mode
+		if test "$investigation_mode" == "investigate"
 		then
+			debug "investigation_mode='$investigation_mode'"
 			return
 		else
-			die "ERROR: Could not find the mainline commit: main:$main <-> sub:$sub - correct prefix=$prefix ?"
+			say "No mainline found from $sub - investigate parents"
+			grl='git rev-list -1 --topo-order --reverse --parents $sub'
+			eval "$grl" |
+				while read rev parents
+				do
+					for parent in $parents
+					do
+						debug "parent ${parent}"
+						main_split=$(find_existing_splits_from_onto_branch_history $parent)
+						if test ! -z "$main_split"
+						then
+							debug "Found mainline via parents $main_split"
+							printf $main_split
+							return
+						fi
+					done
+				done || die "ERROR: Something when wrong when investigating sub parents to mainline"
+			return
 		fi
 	fi
 	main=${main_line%% *}
@@ -827,7 +846,6 @@ find_existing_splits_from_onto_branch_history () {
 		printf "$main"
 	fi
 }
-
 find_existing_split_commit_from_main_history () {
 	# This function finds the split commit history from a previously split of prefix
 	main=$(git rev-parse $1) || die "Could not parse $1"
@@ -931,9 +949,9 @@ cmd_split () {
 		then
 			if rev_exists "$onto"
 			then
-				say "Finding last split point from HEAD of $onto branch"
-				main=$(find_existing_splits_from_onto_branch_history $onto)
-				debug "Found: $main"
+				say "Finding last split point from HEAD of branch: $onto - revision: $( git rev-parse $onto)"
+				main=$(find_existing_splits_from_onto_branch_history $onto) || die
+				say "Found: $main"
 				unrevs="^${main}"
 
 				sub=$(git rev-parse $onto)
@@ -970,16 +988,15 @@ cmd_split () {
 	say "$final_progress"
 
 	latest_new=$(cache_get latest_new)
-
 	if test -z "$latest_new"
 	then
-		say "No new revisions were found"
+		say "No new revisions were found to split"
 		if test -n "$branch"
 		then
 			latest_new_exists=$(cache_get latest_new_exists)
 			if rev_exists "refs/heads/$branch"
 			then
-				if test $revcount -gt 0
+				if test $revmax -gt 0
 				then
 					if ! rev_is_descendant_of_branch "$latest_new_exists" "$branch"
 					then
@@ -1112,8 +1129,8 @@ cmd_lookup () {
 	mains=$(find_existing_splits_from_onto_branch_history $revs "investigate" )
 	if test -z $mains
 	then
-		debug "Could not find a reference on the mainline with prefix - try to find it a meaningful relation in reverse"
-		debug "Try to find sub revision from $revs"
+		say "Could not find a reference on the mainline with prefix - try to find it a meaningful relation in reverse"
+		say "Try to find sub revision from $revs"
 		mains=$(find_existing_split_commit_from_main_history $revs)
 		if test -z $mains
 		then
