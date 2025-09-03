@@ -48,6 +48,8 @@
 #include "csum-file.h"
 #include "promisor-remote.h"
 #include "hook.h"
+#include "submodule.h"
+#include "submodule-config.h"
 
 /* Mask for the name length in ce_flags in the on-disk index */
 
@@ -3879,6 +3881,7 @@ void overlay_tree_on_index(struct index_state *istate,
 }
 
 struct update_callback_data {
+	struct repository *repo;
 	struct index_state *index;
 	int include_sparse;
 	int flags;
@@ -3924,7 +3927,16 @@ static void update_callback(struct diff_queue_struct *q,
 		default:
 			die(_("unexpected diff status %c"), p->status);
 		case DIFF_STATUS_MODIFIED:
-		case DIFF_STATUS_TYPE_CHANGED:
+			const struct submodule *sub = submodule_from_path(data->repo, NULL, path);
+			if (sub) {
+				if ( sub->ignore ) {
+					fprintf(stderr, "GIT_TRACE: Skipping submodule with ignore NOT NULL: %s\n", path);
+					if (strcmp(sub->ignore, "all") == 0) {
+						trace_printf("Skipping submodule with ignore=all: %s\n", path);
+						continue;
+					}
+				}
+			}
 			if (add_file_to_index(data->index, path, data->flags)) {
 				if (!(data->flags & ADD_CACHE_IGNORE_ERRORS))
 					die(_("updating files failed"));
@@ -3949,8 +3961,8 @@ int add_files_to_cache(struct repository *repo, const char *prefix,
 {
 	struct update_callback_data data;
 	struct rev_info rev;
-
 	memset(&data, 0, sizeof(data));
+	data.repo = repo;
 	data.index = repo->index;
 	data.include_sparse = include_sparse;
 	data.flags = flags;
