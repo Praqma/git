@@ -3885,6 +3885,7 @@ struct update_callback_data {
 	struct index_state *index;
 	int include_sparse;
 	int flags;
+	int ignored_too;
 	int add_errors;
 };
 
@@ -3930,9 +3931,25 @@ static void update_callback(struct diff_queue_struct *q,
 			const struct submodule *sub = submodule_from_path(data->repo, NULL, path);
 			if (sub) {
 				if ( sub->ignore ) {
-					fprintf(stderr, "GIT_TRACE: Skipping submodule with ignore NOT NULL: %s\n", path);
+					trace_printf("ignore=%s\n", sub->ignore);
 					if (strcmp(sub->ignore, "all") == 0) {
+						trace_printf("ignore=all - test\n");	
+						if ( data->ignored_too ) {
+							trace_printf("ignored_too=%d --force given\n", data->ignored_too);
+							if ( data->ignored_too > 0 ) {
+								trace_printf("Adding submodule even ignore=all is due to --force|-f: %s\n", path);
+							} else {
+								printf("Skipping submodule with ignore=all: %s\n", path);
+								printf("  Use -f if you really want to add them.");
+								continue;
+							}
+						} else {
+							trace_printf("--force not set");
+							continue;
+						}
+					} else {
 						trace_printf("Skipping submodule with ignore=all: %s\n", path);
+						trace_printf("  Use -f if you really want to add them.");
 						continue;
 					}
 				}
@@ -3957,7 +3974,7 @@ static void update_callback(struct diff_queue_struct *q,
 
 int add_files_to_cache(struct repository *repo, const char *prefix,
 		       const struct pathspec *pathspec, char *ps_matched,
-		       int include_sparse, int flags)
+		       int include_sparse, int flags, int ignored_too )
 {
 	struct update_callback_data data;
 	struct rev_info rev;
@@ -3966,6 +3983,8 @@ int add_files_to_cache(struct repository *repo, const char *prefix,
 	data.index = repo->index;
 	data.include_sparse = include_sparse;
 	data.flags = flags;
+	trace_printf("DEBUG ignored_too=%d\n", ignored_too);
+	data.ignored_too = ignored_too;
 
 	repo_init_revisions(repo, &rev, prefix);
 	setup_revisions(0, NULL, &rev, NULL);

@@ -5,6 +5,7 @@
  */
 
 #include "builtin.h"
+#include "trace.h"
 #include "advice.h"
 #include "config.h"
 #include "environment.h"
@@ -580,9 +581,10 @@ int cmd_add(int argc,
 	if (add_renormalize)
 		exit_status |= renormalize_tracked_files(repo, &pathspec, flags);
 	else
+		trace_printf("DEBUG ignored_too=%d\n", ignored_too);
 		exit_status |= add_files_to_cache(repo, prefix,
 						  &pathspec, ps_matched,
-						  include_sparse, flags);
+						  include_sparse, flags, ignored_too);
 
 	if (take_worktree_changes && !add_renormalize && !ignore_add_errors &&
 	    report_path_error(ps_matched, &pathspec))
