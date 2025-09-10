@@ -3920,6 +3920,8 @@ static void update_callback(struct diff_queue_struct *q,
 		struct diff_filepair *p = q->queue[i];
 		const char *path = p->one->path;
 
+		trace_printf("File '%s'\n", path);
+
 		if (!data->include_sparse &&
 		    !path_in_sparse_checkout(path, data->index))
 			continue;
@@ -3928,30 +3930,19 @@ static void update_callback(struct diff_queue_struct *q,
 		default:
 			die(_("unexpected diff status %c"), p->status);
 		case DIFF_STATUS_MODIFIED:
-			const struct submodule *sub = submodule_from_path(data->repo, NULL, path);
-			if (sub) {
-				if ( sub->ignore ) {
-					trace_printf("ignore=%s\n", sub->ignore);
-					if (strcmp(sub->ignore, "all") == 0) {
-						trace_printf("ignore=all - test\n");	
-						if ( data->ignored_too ) {
-							trace_printf("ignored_too=%d --force given\n", data->ignored_too);
-							if ( data->ignored_too > 0 ) {
-								trace_printf("Adding submodule even ignore=all is due to --force|-f: %s\n", path);
-							} else {
-								printf("Skipping submodule with ignore=all: %s\n", path);
-								printf("  Use -f if you really want to add them.");
-								continue;
-							}
-						} else {
-							trace_printf("--force not set");
-							continue;
-						}
-					} else {
-						trace_printf("Skipping submodule with ignore=all: %s\n", path);
-						trace_printf("  Use -f if you really want to add them.");
-						continue;
-					}
+			trace_printf("diff modified '%s'\n", path);
+			const struct submodule *sub = submodule_from_path(data->repo, null_oid(the_hash_algo), path);
+			if ( sub && sub->name ) 
+				trace_printf("  submodule %s\n", sub->name);
+			if ( sub && sub->name && sub->ignore && strcmp(sub->ignore, "all") == 0 ) {
+				trace_printf("ignore=all %s\n" , path );	
+				if ( data->ignored_too && data->ignored_too > 0 ) {
+					trace_printf("Adding submodule even ignore=all is due to --force|-f: %s\n", path);
+				} else {
+					trace_printf("Skipping submodule with ignore=all: %s\n", path);
+					trace_printf("  Use -f if you really want to add them.");
+					/* Skip this path (submodule ignored) and move on to next diff pair */
+					continue;
 				}
 			}
 			if (add_file_to_index(data->index, path, data->flags)) {
