@@ -3932,8 +3932,6 @@ static void update_callback(struct diff_queue_struct *q,
 		case DIFF_STATUS_MODIFIED:
 			trace_printf("diff modified '%s'\n", path);
 			const struct submodule *sub = submodule_from_path(data->repo, null_oid(the_hash_algo), path);
-			if ( sub && sub->name ) 
-				trace_printf("  submodule %s\n", sub->name);
 			if ( sub && sub->name && sub->ignore && strcmp(sub->ignore, "all") == 0 ) {
 				trace_printf("ignore=all %s\n" , path );	
 				if ( data->ignored_too && data->ignored_too > 0 ) {
