@@ -34,6 +34,9 @@ test_expect_success 'setup: create origin repos'  '
 	cd "${base_path}"
 '
 #2
+# add submodule with default config (ignore=none) and 
+# check log that is contains a path entry for the submodule 'sub'
+# change the commit in the submodule and check that 'git status' shows it as modified
 test_expect_success 'main: add submodule with default config'  '
 	cd "${base_path}" &&
 	cd main && 
@@ -46,6 +49,7 @@ test_expect_success 'main: add submodule with default config'  '
 '
 
 #3
+# change the submodule config to ignore=all and check that status and log do not show changes
 test_expect_success 'main: submodule config ignore=all'  '
 	cd "${base_path}" &&
 	cd main && 
@@ -57,6 +61,8 @@ test_expect_success 'main: submodule config ignore=all'  '
 	echo
 '
 #4
+# change the commit in the submodule and check that 'git status' does not show it as modified
+# but 'git status --ignore-submodules=none' does show it as modified
 test_expect_success 'sub: change to different sha1 and check status in main'  '
 	cd "${base_path}" &&
 	cd main &&
@@ -67,6 +73,7 @@ test_expect_success 'sub: change to different sha1 and check status in main'  '
 '
 
 #5
+# check that normal 'git add' does not stage the change in the submodule
 test_expect_success 'main: check normal add and status'  '
 	cd "${base_path}" &&
 	cd main &&
@@ -76,6 +83,10 @@ test_expect_success 'main: check normal add and status'  '
 '
 
 #6
+# check that 'git add --force' does stage the change in the submodule
+# and that 'git status' does show it as modified
+# check that 'git log --ignore-submodules=none' shows the submodule change
+# in the log
 test_expect_success 'main: check force add and status'  '
 	cd "${base_path}" &&
 	cd main &&
