@@ -2,6 +2,11 @@
 
 test_description='git add respects submodule ignore=all and explicit pathspec'
 
+# This test covers the behavior of "git add", "git status" and "git log" when
+# dealing with submodules that have the ignore=all setting in
+# .gitmodules. It ensures that changes in such submodules are
+# ignored by default, but can be staged with "git add --force".
+
 . ./test-lib.sh
 
 GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
@@ -20,6 +25,8 @@ test_expect_success 'setup: create origin repos'  '
 		git tag v1.0 &&
 		test_commit sub_file2 &&
 		git tag v2.0 &&
+		test_commit sub_file3 &&
+		git tag v3.0 &&
 	cd "${base_path}" &&
 	git init main &&
 		cd main &&
@@ -27,19 +34,29 @@ test_expect_success 'setup: create origin repos'  '
 	cd "${base_path}"
 '
 #2
-test_expect_success 'main: add submodule and config ignore=all'  '
+test_expect_success 'main: add submodule with default config'  '
 	cd "${base_path}" &&
 	cd main && 
 	git submodule add ../sub &&
 	git commit -m "add submodule" &&
-	git config -f .gitmodules submodule.sub.ignore all &&
-	git add . &&
-	git commit -m "update submodule config sub.ignore all" &&
-	! git status --porcelain | grep "^.*$" &&
+	git log --oneline --name-only | grep "^sub$" &&
+	git -C sub reset --hard v2.0 &&
+	git status --porcelain | grep "^ M sub$" &&
 	echo
 '
 
 #3
+test_expect_success 'main: submodule config ignore=all'  '
+	cd "${base_path}" &&
+	cd main && 
+	git config -f .gitmodules submodule.sub.ignore all &&
+	git add . &&
+	git commit -m "update submodule config sub.ignore all" &&
+	! git status --porcelain | grep "^.*$" &&
+	! git log --oneline --name-only | grep "^sub$" &&
+	echo
+'
+#4
 test_expect_success 'sub: change to different sha1 and check status in main'  '
 	cd "${base_path}" &&
 	cd main &&
@@ -49,7 +66,7 @@ test_expect_success 'sub: change to different sha1 and check status in main'  '
 	echo
 '
 
-#4
+#5
 test_expect_success 'main: check normal add and status'  '
 	cd "${base_path}" &&
 	cd main &&
@@ -58,7 +75,7 @@ test_expect_success 'main: check normal add and status'  '
 	echo
 '
 
-#5
+#6
 test_expect_success 'main: check force add and status'  '
 	cd "${base_path}" &&
 	cd main &&
@@ -71,3 +88,4 @@ test_expect_success 'main: check force add and status'  '
 '
 test_done
 exit 0
+
