@@ -47,14 +47,13 @@ test_expect_success 'main: add submodule with default config'  '
 	git status --porcelain | grep "^ M sub$" &&
 	echo
 '
-
 #3
 # change the submodule config to ignore=all and check that status and log do not show changes
 test_expect_success 'main: submodule config ignore=all'  '
 	cd "${base_path}" &&
 	cd main && 
 	git config -f .gitmodules submodule.sub.ignore all &&
-	git add . &&
+	GIT_TRACE=1 git add . &&
 	git commit -m "update submodule config sub.ignore all" &&
 	! git status --porcelain | grep "^.*$" &&
 	! git log --oneline --name-only | grep "^sub$" &&
@@ -77,26 +76,56 @@ test_expect_success 'sub: change to different sha1 and check status in main'  '
 test_expect_success 'main: check normal add and status'  '
 	cd "${base_path}" &&
 	cd main &&
-	git add . &&
+	GIT_TRACE=1 git add . &&
 	! git status --porcelain | grep "^ M sub$" &&
 	echo
 '
 
 #6
-# check that 'git add --force' does stage the change in the submodule
-# and that 'git status' does show it as modified
-# check that 'git log --ignore-submodules=none' shows the submodule change
-# in the log
-test_expect_success 'main: check force add and status'  '
+# check that 'git add --force .' does not stage the change in the submodule
+# and that 'git status' does not show it as modified
+test_expect_success 'main: check --force add . and status'  '
 	cd "${base_path}" &&
 	cd main &&
-	git add --force . &&
+	GIT_TRACE=1 git add --force . &&
+	! git status --porcelain | grep "^M  sub$" &&
+	echo
+'
+
+#7
+# check that 'git add .' does not stage the change in the submodule
+# and that 'git status' does not show it as modified
+test_expect_success 'main: check _add sub_ and status'  '
+	cd "${base_path}" &&
+	cd main &&
+	GIT_TRACE=1 git add sub | grep "Skipping submodule due to ignore=all: sub" &&
+	! git status --porcelain | grep "^M  sub$" &&
+	echo
+'
+
+#8
+# check that 'git add --force sub' does stage the change in the submodule
+# check that 'git add --force ./sub/' does stage the change in the submodule
+# and that 'git status --porcelain' does show it as modified
+# commit it..
+# check that 'git log --ignore-submodules=none' shows the submodule change
+# in the log
+test_expect_success 'main: check force add sub and ./sub/ and status'  '
+	cd "${base_path}" &&
+	cd main &&
+	echo "Adding with --force should work: git add --force sub" &&
+	GIT_TRACE=1 git add --force sub &&
+	git status --porcelain | grep "^M  sub$" &&
+	git restore --staged sub &&
+	! git status --porcelain | grep "^M  sub$" &&
+	echo "Adding with --force should work: git add --force ./sub/" &&
+	GIT_TRACE=1 git add --force ./sub/ &&
 	git status --porcelain | grep "^M  sub$" &&
 	git commit -m "update submodule pointer" &&
 	! git status --porcelain | grep "^ M sub$" &&
 	git log --ignore-submodules=none --name-only --oneline | grep "^sub$" &&
 	echo
 '
+
 test_done
 exit 0
-

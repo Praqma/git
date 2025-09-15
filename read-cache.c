@@ -3887,6 +3887,7 @@ struct update_callback_data {
 	int flags;
 	int ignored_too;
 	int add_errors;
+	struct pathspec *pathspec;
 };
 
 static int fix_unmerged_status(struct diff_filepair *p,
@@ -3920,8 +3921,6 @@ static void update_callback(struct diff_queue_struct *q,
 		struct diff_filepair *p = q->queue[i];
 		const char *path = p->one->path;
 
-		trace_printf("File '%s'\n", path);
-
 		if (!data->include_sparse &&
 		    !path_in_sparse_checkout(path, data->index))
 			continue;
@@ -3929,17 +3928,44 @@ static void update_callback(struct diff_queue_struct *q,
 		switch (fix_unmerged_status(p, data)) {
 		default:
 			die(_("unexpected diff status %c"), p->status);
-		case DIFF_STATUS_MODIFIED:
-			trace_printf("diff modified '%s'\n", path);
+		case DIFF_STATUS_MODIFIED: {
 			const struct submodule *sub = submodule_from_path(data->repo, null_oid(the_hash_algo), path);
-			if ( sub && sub->name && sub->ignore && strcmp(sub->ignore, "all") == 0 ) {
-				trace_printf("ignore=all %s\n" , path );	
-				if ( data->ignored_too && data->ignored_too > 0 ) {
-					trace_printf("Adding submodule even ignore=all is due to --force|-f: %s\n", path);
+			if (sub && sub->name && sub->ignore && !strcmp(sub->ignore, "all")) {
+				int pathspec_matches = 0;
+				char *norm_pathspec = NULL;
+				int ps_i;
+				trace_printf("ignore=all %s\n", path);
+				trace_printf("pathspec %s\n",
+						 (data->pathspec && data->pathspec->nr) ? "has pathspec" : "no pathspec");
+				/* Safely scan all pathspec items (q->nr may exceed pathspec->nr). */
+				if (data->pathspec) {
+					for (ps_i = 0; ps_i < data->pathspec->nr; ps_i++) {
+						const char *m = data->pathspec->items[ps_i].match;
+						if (!m)
+							continue;
+						norm_pathspec = xstrdup(m);
+						strip_dir_trailing_slashes(norm_pathspec);
+						if (!strcmp(path, norm_pathspec)) {
+							pathspec_matches = 1;
+							free(norm_pathspec);
+							norm_pathspec = NULL;
+							break;
+						}
+						free(norm_pathspec);
+						norm_pathspec = NULL;
+					}
+				}
+				if (pathspec_matches) {
+					if (data->ignored_too && data->ignored_too > 0) {
+						trace_printf("Forcing add of submodule ignored=all due to --force: %s\n", path);
+					} else {
+						printf("Skipping submodule due to ignore=all: %s\n", path);
+						printf("  Use -f|--force if you really want to add the update to the index.\n");
+						continue;
+					}
 				} else {
-					trace_printf("Skipping submodule with ignore=all: %s\n", path);
-					trace_printf("  Use -f if you really want to add them.");
-					/* Skip this path (submodule ignored) and move on to next diff pair */
+					/* No explicit pathspec match -> skip silently (or with trace). */
+					trace_printf("pathspec does not match %s\n", path);
 					continue;
 				}
 			}
@@ -3949,6 +3975,7 @@ static void update_callback(struct diff_queue_struct *q,
 				data->add_errors++;
 			}
 			break;
+		}
 		case DIFF_STATUS_DELETED:
 			if (data->flags & ADD_CACHE_IGNORE_REMOVAL)
 				break;
@@ -3972,8 +3999,9 @@ int add_files_to_cache(struct repository *repo, const char *prefix,
 	data.index = repo->index;
 	data.include_sparse = include_sparse;
 	data.flags = flags;
-	trace_printf("DEBUG ignored_too=%d\n", ignored_too);
 	data.ignored_too = ignored_too;
+	data.pathspec = (struct pathspec *)pathspec;
+
 
 	repo_init_revisions(repo, &rev, prefix);
 	setup_revisions(0, NULL, &rev, NULL);
